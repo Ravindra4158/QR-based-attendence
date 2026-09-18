@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo 'Build step complete'",
+    "build": "npm install --omit=dev --ignore-scripts",
+    "postinstall": "npm install --omit=dev --ignore-scripts",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "seed": "node src/seed.js",
