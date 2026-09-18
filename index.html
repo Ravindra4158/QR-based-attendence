@@ -162,8 +162,11 @@
          ===================================================== -->
     <div class="app-shell">
 
+      <!-- Sidebar backdrop for mobile -->
+      <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
       <!-- Sidebar -->
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="brand">
           <span class="brand-mark">A</span>
           <span>attendly</span>
@@ -201,6 +204,9 @@
       <!-- Main -->
       <main class="main-content">
         <header class="topbar">
+          <button class="icon-button mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">
+            <i data-lucide="menu"></i>
+          </button>
           <div class="mobile-brand">
             <span class="brand-mark">A</span><span>attendly</span>
           </div>

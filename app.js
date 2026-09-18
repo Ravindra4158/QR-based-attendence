@@ -292,6 +292,7 @@ function renderSidebar() {
    VIEW ROUTING
    ========================================================== */
 function switchView(viewName) {
+  if (window.closeMobileMenu) window.closeMobileMenu();
   document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.remove('active'));
   const navBtn = $(`nav-${viewName}`);
   if (navBtn) navBtn.classList.add('active');
@@ -1059,6 +1060,31 @@ function initNav() {
 
   // Profile form
   $('profile-form').addEventListener('submit', handleSaveProfile);
+
+  // Mobile 3-line hamburger menu & sidebar drawer
+  const toggleMobileMenu = () => {
+    const sidebar = $('sidebar');
+    const backdrop = $('sidebar-backdrop');
+    if (!sidebar) return;
+    const isOpen = sidebar.classList.contains('open');
+    if (isOpen) {
+      sidebar.classList.remove('open');
+      if (backdrop) backdrop.classList.remove('active');
+    } else {
+      sidebar.classList.add('open');
+      if (backdrop) backdrop.classList.add('active');
+    }
+  };
+
+  window.closeMobileMenu = () => {
+    const sidebar = $('sidebar');
+    const backdrop = $('sidebar-backdrop');
+    if (sidebar) sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('active');
+  };
+
+  if ($('mobile-menu-toggle')) $('mobile-menu-toggle').addEventListener('click', toggleMobileMenu);
+  if ($('sidebar-backdrop')) $('sidebar-backdrop').addEventListener('click', window.closeMobileMenu);
 }
 
 /* ==========================================================

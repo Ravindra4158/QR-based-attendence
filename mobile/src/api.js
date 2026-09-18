@@ -1,26 +1,10 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
-
-import {
-  offlineLogin,
-  offlineRegister,
-  offlineGetCourses,
-  offlineCreateCourse,
-  offlineStartSession,
-  offlineStopSession,
-  offlineMarkAttendance,
-  offlineGetAttendancePct,
-  offlineGetStudents,
-  offlineGetCourseDetail,
-  offlineExportCsv,
-} from './offlineBackend';
 
 const DEFAULT_SERVER_URL = 'https://attendly-app-gg6q.onrender.com';
 let _cachedHost = null;
 
-// Determine host: Custom URL (if set) > Render Production URL (default) > Fallback
+// Determine host: Custom URL (if set) > Render Production URL (default)
 export const getHost = async () => {
   try {
     const custom = await AsyncStorage.getItem('attendly_server_url');
@@ -49,7 +33,7 @@ export const setCustomServerUrl = async (url) => {
 };
 
 const api = axios.create({
-  timeout: 4000,
+  timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -67,32 +51,19 @@ export const setAuthToken = token => {
   else delete api.defaults.headers.common.Authorization;
 };
 
-/* ── Fallback Helpers ─────────────────────────────────────────────────── */
+/* ── API Route Methods (Strictly Online Server) ────────────────────────── */
 
 export const login = async (email, password) => {
-  try {
-    const res = await api.post('/auth/login', { email, password });
-    await AsyncStorage.setItem('attendly_token', res.data.token);
-    await AsyncStorage.setItem('attendly_user', JSON.stringify(res.data.user));
-    setAuthToken(res.data.token);
-    return res.data;
-  } catch (err) {
-    // Offline fallback
-    const res = await offlineLogin(email, password);
-    await AsyncStorage.setItem('attendly_token', res.token);
-    await AsyncStorage.setItem('attendly_user', JSON.stringify(res.user));
-    setAuthToken(res.token);
-    return res;
-  }
+  const res = await api.post('/auth/login', { email, password });
+  await AsyncStorage.setItem('attendly_token', res.data.token);
+  await AsyncStorage.setItem('attendly_user', JSON.stringify(res.data.user));
+  setAuthToken(res.data.token);
+  return res.data;
 };
 
 export const register = async (name, email, password, role, rollNo) => {
-  try {
-    const res = await api.post('/auth/register', { name, email, password, role, rollNo: rollNo || undefined });
-    return res.data;
-  } catch (err) {
-    return await offlineRegister(name, email, password, role, rollNo);
-  }
+  const res = await api.post('/auth/register', { name, email, password, role, rollNo: rollNo || undefined });
+  return res.data;
 };
 
 export const logout = async () => {
@@ -102,117 +73,64 @@ export const logout = async () => {
 };
 
 export const getProfile = async () => {
-  try {
-    const res = await api.get('/auth/me');
-    return res.data.user;
-  } catch (err) {
-    const raw = await AsyncStorage.getItem('attendly_user');
-    return raw ? JSON.parse(raw) : null;
-  }
+  const res = await api.get('/auth/me');
+  return res.data.user;
 };
 
 export const updateProfile = async data => {
-  try {
-    const res = await api.put('/auth/profile', data);
-    await AsyncStorage.setItem('attendly_user', JSON.stringify(res.data.user));
-    return res.data.user;
-  } catch (err) {
-    const raw = await AsyncStorage.getItem('attendly_user');
-    const user = raw ? JSON.parse(raw) : {};
-    const updated = { ...user, ...data };
-    await AsyncStorage.setItem('attendly_user', JSON.stringify(updated));
-    return updated;
-  }
+  const res = await api.put('/auth/profile', data);
+  await AsyncStorage.setItem('attendly_user', JSON.stringify(res.data.user));
+  return res.data.user;
 };
 
 export const getStudents = async () => {
-  try {
-    const res = await api.get('/auth/students');
-    return res.data.students;
-  } catch (err) {
-    return await offlineGetStudents();
-  }
+  const res = await api.get('/auth/students');
+  return res.data.students;
 };
 
 export const getCourses = async () => {
-  try {
-    const res = await api.get('/courses');
-    return res.data.courses;
-  } catch (err) {
-    return await offlineGetCourses();
-  }
+  const res = await api.get('/courses');
+  return res.data.courses;
 };
 
 export const createCourse = async data => {
-  try {
-    const res = await api.post('/courses', data);
-    return res.data.course;
-  } catch (err) {
-    return await offlineCreateCourse(data);
-  }
+  const res = await api.post('/courses', data);
+  return res.data.course;
 };
 
 export const startSession = async courseId => {
-  try {
-    const res = await api.post('/sessions/start', { courseId });
-    return res.data.session;
-  } catch (err) {
-    return await offlineStartSession(courseId);
-  }
+  const res = await api.post('/sessions/start', { courseId });
+  return res.data.session;
 };
 
 export const stopSession = async sessionId => {
-  try {
-    const res = await api.post(`/sessions/${sessionId}/stop`);
-    return res.data.session;
-  } catch (err) {
-    return await offlineStopSession(sessionId);
-  }
+  const res = await api.post(`/sessions/${sessionId}/stop`);
+  return res.data.session;
 };
 
 export const getSessionRoster = async sessionId => {
-  try {
-    const res = await api.get(`/attendance/session/${sessionId}`);
-    return res.data;
-  } catch (err) {
-    return { success: true, sessionId, count: 0, students: [] };
-  }
+  const res = await api.get(`/attendance/session/${sessionId}`);
+  return res.data;
 };
 
 export const markAttendance = async (sessionId, token) => {
-  try {
-    const res = await api.post('/attendance/mark', { sessionId, token });
-    return res.data;
-  } catch (err) {
-    return await offlineMarkAttendance(sessionId, token);
-  }
+  const res = await api.post('/attendance/mark', { sessionId, token });
+  return res.data;
 };
 
 export const getAttendancePct = async (studentId, courseId) => {
-  try {
-    const res = await api.get(`/attendance/student/${studentId}/course/${courseId}`);
-    return res.data;
-  } catch (err) {
-    return await offlineGetAttendancePct(studentId, courseId);
-  }
+  const res = await api.get(`/attendance/student/${studentId}/course/${courseId}`);
+  return res.data;
 };
 
 export const getCourseDetail = async courseId => {
-  try {
-    const res = await api.get(`/courses/${courseId}`);
-    return res.data.course;
-  } catch (err) {
-    return await offlineGetCourseDetail(courseId);
-  }
+  const res = await api.get(`/courses/${courseId}`);
+  return res.data.course;
 };
 
 export const exportAttendanceCsv = async courseId => {
-  try {
-    const res = await api.get(`/attendance/export/${courseId}`, { responseType: 'text' });
-    return res.data;
-  } catch (err) {
-    return await offlineExportCsv(courseId);
-  }
+  const res = await api.get(`/attendance/export/${courseId}`, { responseType: 'text' });
+  return res.data;
 };
 
 export default api;
