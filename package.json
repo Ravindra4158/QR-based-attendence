@@ -2,8 +2,8 @@
   "name": "attendly-mern-mobile",
   "private": true,
   "scripts": {
-    "build": "npm --prefix server install",
-    "postinstall": "npm --prefix server install",
+    "build": "npm --prefix server install --omit=dev",
+    "postinstall": "npm --prefix server install --omit=dev",
     "start": "node server/src/server.js",
     "dev": "npm --prefix server run dev",
     "seed": "node --env-file=server/.env server/src/seed.js",
