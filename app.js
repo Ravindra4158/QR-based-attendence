@@ -518,16 +518,21 @@ function updateRosterSummary() {
 }
 
 function addStudentToRoster(record) {
-  if (state.roster.find(r => r.studentId?._id === record.studentId?._id || r.studentId === record.studentId)) return;
+  const stuObj = (record && typeof record.studentId === 'object' && record.studentId !== null) ? record.studentId : (record.student || record.user || record);
+  const stuId = stuObj._id || stuObj.id || record.studentId;
+  if (state.roster.find(r => {
+    const rStu = (r && typeof r.studentId === 'object' && r.studentId !== null) ? r.studentId : (r.student || r.user || r);
+    return (rStu._id || rStu.id || r.studentId) === stuId;
+  })) return;
   state.roster.push(record);
   updateRosterSummary();
   prependRosterRow(record);
 }
 
 function prependRosterRow(record) {
-  const student = record.studentId || {};
-  const name = student.name || 'Student';
-  const rollNo = student.rollNo ? ` (${student.rollNo})` : '';
+  const student = (record && typeof record.studentId === 'object' && record.studentId !== null) ? record.studentId : (record.student || record.user || record);
+  const name = student.name || record.name || record.studentName || 'Student';
+  const rollNo = (student.rollNo || record.rollNo) ? ` (${student.rollNo || record.rollNo})` : '';
   const col = avatarColor(name);
   const time = fmt12(record.scannedAt || new Date());
   const row = document.createElement('div');

@@ -408,16 +408,18 @@ export default function TeacherScreen({ user, token, onLogout }) {
               {roster.length > 0 ? (
                 <View style={s.studentList}>
                   {roster.map((r, i) => {
-                    const stu = r.studentId || {};
-                    const col = getAvatarColor(stu.name || '');
+                    const stu = (r && typeof r.studentId === 'object' && r.studentId !== null) ? r.studentId : (r.student || r.user || r);
+                    const stuName = stu.name || r.name || r.studentName || 'Student';
+                    const stuRoll = stu.rollNo || r.rollNo || '—';
+                    const col = getAvatarColor(stuName);
                     return (
                       <View key={r._id || i} style={[s.rosterRow, i === roster.length - 1 && { borderBottomWidth: 0 }]}>
                         <View style={[s.avatarSm, { backgroundColor: col.bg }]}>
-                          <Text style={[s.avatarSmText, { color: col.fg }]}>{getInitials(stu.name)}</Text>
+                          <Text style={[s.avatarSmText, { color: col.fg }]}>{getInitials(stuName)}</Text>
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={s.rosterName}>{stu.name || 'Student'}</Text>
-                          <Text style={s.rosterSub}>{stu.rollNo ? `(${stu.rollNo})` : '—'} · Verified scan</Text>
+                          <Text style={s.rosterName}>{stuName}</Text>
+                          <Text style={s.rosterSub}>{stuRoll !== '—' ? `(${stuRoll})` : '—'} · Verified scan</Text>
                         </View>
                         <Text style={s.scanTime}>{fmt12(r.scannedAt || new Date())}</Text>
                         <Text style={s.presentCheck}>✓</Text>

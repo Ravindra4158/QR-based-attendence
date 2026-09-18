@@ -26,7 +26,16 @@ router.post('/mark', requireAuth, requireRole('student'), async (req, res, next)
     if (Date.now() >= session.tokenExpiresAt.getTime()) return res.status(400).json({ success: false, code: 'QR_EXPIRED', message: 'QR expired, please rescan' });
     
     const attendance = await Attendance.create({ sessionId, studentId: req.user.id });
-    const populatedAttendance = await Attendance.findById(attendance._id).populate('studentId', 'name rollNo email');
+    let populatedAttendance = await Attendance.findById(attendance._id).populate('studentId', 'name rollNo email');
+
+    if (!populatedAttendance || !populatedAttendance.studentId || typeof populatedAttendance.studentId !== 'object' || !populatedAttendance.studentId.name) {
+      const userDoc = await User.findById(req.user.id).select('name rollNo email');
+      const attObj = populatedAttendance ? populatedAttendance.toObject() : attendance.toObject();
+      attObj.studentId = userDoc 
+        ? { _id: userDoc._id, name: userDoc.name, rollNo: userDoc.rollNo, email: userDoc.email }
+        : { _id: req.user.id, name: req.user.name || 'Student', rollNo: 'N/A' };
+      populatedAttendance = attObj;
+    }
 
     const io = req.app.get('io');
     if (io) {
@@ -46,7 +55,21 @@ router.post('/mark', requireAuth, requireRole('student'), async (req, res, next)
 });
 
 router.get('/session/:id', requireAuth, requireRole('teacher'), async (req, res, next) => {
-  try { const session = await Session.findById(req.params.id).populate('courseId', 'teacherId'); if (!session || session.courseId.teacherId.toString() !== req.user.id) return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Session not found' }); const students = await Attendance.find({ sessionId: req.params.id }).populate('studentId', 'name rollNo email').sort({ scannedAt: 1 }); res.json({ success: true, sessionId: req.params.id, count: students.length, students }); } catch (error) { next(error); }
+  try {
+    const session = await Session.findById(req.params.id).populate('courseId', 'teacherId');
+    if (!session || session.courseId.teacherId.toString() !== req.user.id) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Session not found' });
+    }
+    const students = await Attendance.find({ sessionId: req.params.id }).populate('studentId', 'name rollNo email').sort({ scannedAt: 1 });
+    const formattedStudents = await Promise.all(students.map(async st => {
+      if (st.studentId && typeof st.studentId === 'object' && st.studentId.name) return st;
+      const userDoc = await User.findById(st.studentId).select('name rollNo email');
+      const obj = st.toObject();
+      obj.studentId = userDoc ? { _id: userDoc._id, name: userDoc.name, rollNo: userDoc.rollNo, email: userDoc.email } : { _id: st.studentId, name: 'Student', rollNo: 'N/A' };
+      return obj;
+    }));
+    res.json({ success: true, sessionId: req.params.id, count: formattedStudents.length, students: formattedStudents });
+  } catch (error) { next(error); }
 });
 
 router.get('/student/:studentId/course/:courseId', requireAuth, requireRole('student'), async (req, res, next) => {
