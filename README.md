@@ -35,7 +35,6 @@ Teacher dashboard updates live
 | Realtime | Socket.IO |
 | Authentication | JWT |
 | Password hashing | bcrypt.js |
-| Demo frontend hosting | Vercel/Netlify |
 | Demo backend hosting | Render/Railway |
 
 This stack follows the supplied PRD/Technical Design. fileciteturn0file0L116-L130
