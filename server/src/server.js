@@ -77,7 +77,22 @@ io.on('connection', socket => {
 
 const port = Number(process.env.PORT || 4000);
 connectDatabase()
-  .then(() => httpServer.listen(port, () => console.log(`🚀 Attendly API + UI  →  http://localhost:${port}`)))
+  .then(() => httpServer.listen(port, () => {
+    console.log(`🚀 Attendly API + UI  →  http://localhost:${port}`);
+    
+    // Auto Keep-Alive for Render (self-pings /health every 12 mins to prevent sleep)
+    const renderUrl = process.env.RENDER_EXTERNAL_URL || process.env.SELF_PING_URL;
+    if (renderUrl) {
+      console.log(`📡 Render Keep-Alive active: ${renderUrl}`);
+      setInterval(() => {
+        const https = require('node:https');
+        const httpLib = renderUrl.startsWith('https') ? https : http;
+        httpLib.get(`${renderUrl}/health`, (res) => {
+          console.log(`[Keep-Alive Ping] /health -> ${res.statusCode}`);
+        }).on('error', (err) => console.log(`[Keep-Alive Ping Error]: ${err.message}`));
+      }, 12 * 60 * 1000);
+    }
+  }))
   .catch(error => { console.error(error.message); process.exit(1); });
 
 process.on('SIGTERM', () => httpServer.close(() => process.exit(0)));
