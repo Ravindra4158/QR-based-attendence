@@ -2,6 +2,7 @@
   "name": "attendly-mern-mobile",
   "private": true,
   "scripts": {
+    "build": "npm --prefix server install",
     "postinstall": "npm --prefix server install",
     "start": "node server/src/server.js",
     "dev": "npm --prefix server run dev",
