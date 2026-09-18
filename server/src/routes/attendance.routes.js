@@ -14,12 +14,22 @@ router.post('/mark', requireAuth, requireRole('student'), async (req, res, next)
     const session = await Session.findById(sessionId);
     if (!session || !session.isActive) return res.status(400).json({ success: false, code: 'SESSION_CLOSED', message: 'Session is closed' });
     const course = await Course.findById(session.courseId);
-    if (!course?.enrolledStudents.some(id => id.toString() === req.user.id)) return res.status(403).json({ success: false, code: 'NOT_ENROLLED', message: 'You are not enrolled in this course' });
+    if (!course) return res.status(404).json({ success: false, code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    
+    // Auto-enroll student into course if not enrolled yet
+    if (!course.enrolledStudents.some(id => id.toString() === req.user.id)) {
+      course.enrolledStudents.push(req.user.id);
+      await course.save();
+    }
+
     if (token !== session.currentToken) return res.status(400).json({ success: false, code: 'INVALID_QR', message: 'This QR code is no longer current' });
     if (Date.now() >= session.tokenExpiresAt.getTime()) return res.status(400).json({ success: false, code: 'QR_EXPIRED', message: 'QR expired, please rescan' });
+    
     const attendance = await Attendance.create({ sessionId, studentId: req.user.id });
-    req.app.get('io').to(`session:${sessionId}`).emit('attendance:marked', { sessionId, attendance });
-    res.status(201).json({ success: true, message: 'Attendance marked successfully', attendance });
+    const populatedAttendance = await Attendance.findById(attendance._id).populate('studentId', 'name rollNo email');
+
+    req.app.get('io').to(`session:${sessionId}`).emit('attendance:marked', { sessionId, attendance: populatedAttendance });
+    res.status(201).json({ success: true, message: 'Attendance marked successfully', attendance: populatedAttendance });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ success: false, code: 'ALREADY_MARKED', message: 'Attendance already marked for this session' });
     next(error);

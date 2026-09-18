@@ -527,13 +527,14 @@ function addStudentToRoster(record) {
 function prependRosterRow(record) {
   const student = record.studentId || {};
   const name = student.name || 'Student';
+  const rollNo = student.rollNo ? ` (${student.rollNo})` : '';
   const col = avatarColor(name);
-  const time = fmt12(record.scannedAt);
+  const time = fmt12(record.scannedAt || new Date());
   const row = document.createElement('div');
   row.className = 'student-row';
   row.innerHTML = `
     <span class="avatar avatar-${col}">${initials(name)}</span>
-    <span class="student-name">${name}<small>Present · verified scan</small></span>
+    <span class="student-name">${name}${rollNo}<small>Present · verified scan</small></span>
     <span class="scan-time">${time}</span>
     <span class="present-check"><i data-lucide="check"></i></span>
   `;
