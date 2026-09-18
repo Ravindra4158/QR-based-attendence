@@ -23,9 +23,10 @@ const app = express();
 const httpServer = http.createServer(app);
 
 const isDev = process.env.NODE_ENV !== 'production';
-const allowedOrigins = isDev
-  ? true  // allow all origins in dev
-  : (process.env.CORS_ORIGIN || '').split(',').map(o => o.trim()).filter(Boolean);
+const corsEnv = process.env.CORS_ORIGIN;
+const allowedOrigins = (isDev || !corsEnv || corsEnv.trim() === '*')
+  ? true  // allow all origins
+  : corsEnv.split(',').map(o => o.trim()).filter(Boolean);
 
 const io = new Server(httpServer, { cors: { origin: allowedOrigins } });
 app.set('io', io);
