@@ -17,9 +17,10 @@ import {
   offlineExportCsv,
 } from './offlineBackend';
 
+const DEFAULT_SERVER_URL = 'https://attendly-app-gg6q.onrender.com';
 let _cachedHost = null;
 
-// Determine host: Custom URL (if set) > LAN IP (if Expo/Device) > 10.0.2.2 (Android Emulator) > localhost
+// Determine host: Custom URL (if set) > Render Production URL (default) > Fallback
 export const getHost = async () => {
   try {
     const custom = await AsyncStorage.getItem('attendly_server_url');
@@ -29,23 +30,11 @@ export const getHost = async () => {
     }
   } catch {}
 
-  if (Platform.OS === 'android') {
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost || Constants.manifest2?.extra?.expoGo?.debuggerHost;
-    if (hostUri) {
-      const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-        _cachedHost = `http://${ip}:4000`;
-        return _cachedHost;
-      }
-    }
-    _cachedHost = 'http://10.0.2.2:4000';
-    return _cachedHost;
-  }
-  _cachedHost = 'http://localhost:4000';
+  _cachedHost = DEFAULT_SERVER_URL;
   return _cachedHost;
 };
 
-export const getSocketUrl = () => _cachedHost || 'http://localhost:4000';
+export const getSocketUrl = () => _cachedHost || DEFAULT_SERVER_URL;
 
 export const setCustomServerUrl = async (url) => {
   if (url && url.trim()) {
