@@ -5,15 +5,21 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { palette, getInitials, getAvatarColor, fmt12 } from '../theme';
-import { getCourses, getAttendancePct, markAttendance, updateProfile, getCourseDetail } from '../api';
+import {
+  getCourses, getAttendancePct, markAttendance, updateProfile,
+  getCourseDetail, getAttendanceHistory,
+} from '../api';
 
 export default function StudentScreen({ user, onLogout }) {
-  const [activeTab, setActiveTab] = useState('scan');
+  const [activeNav, setActiveNav] = useState('overview'); // 'overview' | 'profile'
   const [courses, setCourses] = useState([]);
   const [stats, setStats] = useState({});       // courseId → { attended, total, percentage }
+  const [historyLog, setHistoryLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Scanner modal
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerBusy, setScannerBusy] = useState(false);
   const [scanResult, setScanResult] = useState(null);
@@ -34,16 +40,21 @@ export default function StudentScreen({ user, onLogout }) {
   /* ── Data fetchers ─────────────────────────────────────────── */
   const fetchData = useCallback(async () => {
     try {
-      const data = await getCourses();
-      setCourses(data || []);
+      const [coursesData, historyData] = await Promise.all([
+        getCourses().catch(() => []),
+        getAttendanceHistory().catch(() => ({ history: [] })),
+      ]);
+      setCourses(coursesData || []);
+      setHistoryLog(historyData?.history || []);
+
       const pcts = {};
-      await Promise.all((data || []).map(async c => {
+      await Promise.all((coursesData || []).map(async c => {
         try { pcts[c._id] = await getAttendancePct(user.id, c._id); }
         catch { pcts[c._id] = { attended: 0, total: 0, percentage: 0 }; }
       }));
       setStats(pcts);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || 'Could not load data');
+      Alert.alert('Error', e.response?.data?.message || 'Could not load student data');
     } finally { setLoading(false); setRefreshing(false); }
   }, [user.id]);
 
@@ -123,14 +134,11 @@ export default function StudentScreen({ user, onLogout }) {
   const overallPct = totalSessions > 0 ? ((totalAttended / totalSessions) * 100).toFixed(1) : '—';
   const isOnTrack = parseFloat(overallPct) >= 75;
 
-  const avatarCol = getAvatarColor(user.name);
-
   if (loading) return <View style={s.center}><ActivityIndicator color={palette.blue} size="large" /></View>;
 
-  /* ── Render ────────────────────────────────────────────────── */
   return (
     <View style={s.root}>
-      {/* ── Top bar ────────────────────────────────────────── */}
+      {/* ── Topbar (Mobile Menu Toggle + Brand) ───────────── */}
       <View style={s.topbar}>
         <View style={s.topLeft}>
           <TouchableOpacity style={s.menuBtn} onPress={() => setDrawerOpen(true)}>
@@ -139,26 +147,21 @@ export default function StudentScreen({ user, onLogout }) {
           <View style={s.brandMark}><Text style={s.brandMarkText}>A</Text></View>
           <View>
             <Text style={s.topTitle}>attendly</Text>
-            <Text style={s.topSub}>{user.name} · {user.rollNo || 'Student'}</Text>
+            <Text style={s.topSub}>Student Console · {user.name}</Text>
           </View>
         </View>
         <TouchableOpacity onPress={onLogout} style={s.logoutBtn}>
-          <Text style={s.logoutText}>Sign Out</Text>
+          <Text style={s.logoutText}>Sign out</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ── Tab bar ────────────────────────────────────────── */}
-      <View style={s.tabBar}>
-        {[
-          { key: 'scan', label: 'Scan QR' },
-          { key: 'attendance', label: 'Attendance' },
-          { key: 'courses', label: 'Courses' },
-          { key: 'profile', label: 'Profile' },
-        ].map(t => (
-          <TouchableOpacity key={t.key} style={[s.tabItem, activeTab === t.key && s.tabItemActive]} onPress={() => setActiveTab(t.key)}>
-            <Text style={[s.tabText, activeTab === t.key && s.tabTextActive]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
+      {/* ── Breadcrumb View Title ─────────────────────────── */}
+      <View style={s.breadcrumbBar}>
+        <Text style={s.breadcrumbMuted}>Workspace</Text>
+        <Text style={s.breadcrumbArrow}>›</Text>
+        <Text style={s.breadcrumbActive}>
+          {activeNav === 'overview' ? 'Overview' : 'Profile'}
+        </Text>
       </View>
 
       <ScrollView
@@ -166,18 +169,16 @@ export default function StudentScreen({ user, onLogout }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={palette.blue} />}
       >
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 1 — SCAN QR                                  *
+         *  VIEW 1 — OVERVIEW (Student Console)               *
          * ══════════════════════════════════════════════════ */}
-        {activeTab === 'scan' && (
+        {activeNav === 'overview' && (
           <>
-            {/* Hero banner */}
+            {/* Student Hero Banner */}
             <View style={s.hero}>
               <View style={s.heroLeft}>
                 <Text style={s.heroEyebrow}>STUDENT CONSOLE</Text>
-                <Text style={s.heroTitle}>
-                  {overallPct !== '—' ? (isOnTrack ? 'On track' : 'Needs improvement') : 'Welcome back!'}
-                </Text>
-                <Text style={s.heroSub}>{courses.length} course{courses.length !== 1 ? 's' : ''} enrolled</Text>
+                <Text style={s.heroTitle}>Welcome back!</Text>
+                <Text style={s.heroSub}>Your attendance is synced with the server.</Text>
               </View>
               <View style={s.heroBadge}>
                 <Text style={s.heroBadgeNum}>{overallPct}{overallPct !== '—' ? '%' : ''}</Text>
@@ -187,69 +188,60 @@ export default function StudentScreen({ user, onLogout }) {
 
             {/* Quick stats */}
             <View style={s.statsRow}>
-              <StatCard label="Attended" value={String(totalAttended)} color={palette.mint} />
-              <StatCard label="Total" value={String(totalSessions)} color={palette.blue} />
-              <StatCard label="Courses" value={String(courses.length)} color={palette.yellow} />
+              <View style={s.statCard}>
+                <Text style={s.statLabel}>Overall attendance</Text>
+                <Text style={[s.statVal, { color: palette.blue }]}>{overallPct}{overallPct !== '—' ? '%' : ''}</Text>
+                <Text style={s.statSub}>{totalAttended} of {totalSessions} sessions</Text>
+              </View>
+              <View style={s.statCard}>
+                <Text style={s.statLabel}>Courses enrolled</Text>
+                <Text style={[s.statVal, { color: palette.mint }]}>{courses.length}</Text>
+                <Text style={s.statSub}>Active this semester</Text>
+              </View>
+              <View style={s.statCard}>
+                <Text style={s.statLabel}>Status</Text>
+                <Text style={[s.statVal, { color: isOnTrack ? palette.mint : palette.coral }]}>
+                  {overallPct === '—' ? 'Good' : isOnTrack ? 'Good' : 'Warn'}
+                </Text>
+                <Text style={s.statSub}>{overallPct === '—' ? 'No sessions' : isOnTrack ? 'Good standing' : 'Below 75%'}</Text>
+              </View>
             </View>
 
-            {/* Scan CTA */}
+            {/* Scan CTA Button */}
             <TouchableOpacity style={s.scanBtn} onPress={openScanner} activeOpacity={0.85}>
               <View style={s.scanIconWrap}>
                 <Text style={s.scanIconText}>[QR]</Text>
               </View>
               <View style={s.scanBtnTextWrap}>
-                <Text style={s.scanBtnTitle}>Mark Attendance</Text>
+                <Text style={s.scanBtnTitle}>Mark attendance</Text>
                 <Text style={s.scanBtnSub}>Scan the live classroom QR code</Text>
               </View>
               <Text style={s.scanArrow}>›</Text>
             </TouchableOpacity>
 
-            {/* Quick info */}
-            <View style={s.infoBox}>
-              <Text style={s.infoIconText}>i</Text>
-              <Text style={s.infoText}>Point your camera at the QR code displayed on the classroom projector. Codes refresh every 8 seconds.</Text>
-            </View>
-          </>
-        )}
-
-        {/* ══════════════════════════════════════════════════ *
-         *  TAB 2 — MY ATTENDANCE                            *
-         * ══════════════════════════════════════════════════ */}
-        {activeTab === 'attendance' && (
-          <>
-            {/* Overall summary */}
-            <View style={s.summaryCard}>
-              <View style={s.summaryTop}>
-                <Text style={s.summaryPct}>{overallPct}{overallPct !== '—' ? '%' : ''}</Text>
-                <View style={[s.statusDot, { backgroundColor: isOnTrack ? palette.mint : palette.coral }]} />
-                <Text style={[s.statusText, { color: isOnTrack ? palette.mint : palette.coral }]}>
-                  {overallPct === '—' ? 'No data' : isOnTrack ? 'Good standing' : 'Below 75%'}
-                </Text>
+            {/* My Courses Attendance Panel */}
+            <View style={s.panel}>
+              <View style={s.panelHeader}>
+                <Text style={s.panelMainTitle}>Attendance by course</Text>
+                <Text style={s.panelSubTitle}>Per-subject percentage breakdown</Text>
               </View>
-              <Text style={s.summarySub}>{totalAttended} of {totalSessions} sessions attended across {courses.length} courses</Text>
-            </View>
 
-            {/* Per-course breakdown */}
-            {courses.length > 0 ? (
-              <View style={s.card}>
-                <Text style={s.sectionTitle}>Attendance by Course</Text>
-                {courses.map((c, i) => {
+              {courses.length > 0 ? (
+                courses.map((c, i) => {
                   const r = stats[c._id] || { attended: 0, total: 0, percentage: 0 };
                   const pct = r.percentage || 0;
                   const isGood = pct >= 85;
                   const isWarn = pct >= 75 && pct < 85;
                   const barColor = isGood ? palette.mint : isWarn ? palette.yellow : palette.coral;
-                  const tagColors = [
-                    { bg: palette.blueLight, fg: '#2e5fa1' },
-                    { bg: palette.mintLight, fg: '#2d7a55' },
-                    { bg: palette.yellowLight, fg: '#9a6e1a' },
-                    { bg: palette.coralLight, fg: palette.coralDark },
-                  ];
-                  const tc = tagColors[i % tagColors.length];
                   return (
-                    <View key={c._id} style={[s.courseRow, i === courses.length - 1 && { borderBottomWidth: 0 }]}>
-                      <View style={[s.codeTag, { backgroundColor: tc.bg }]}>
-                        <Text style={[s.codeTagText, { color: tc.fg }]}>{c.code}</Text>
+                    <TouchableOpacity
+                      key={c._id}
+                      style={[s.courseRow, i === courses.length - 1 && { borderBottomWidth: 0 }]}
+                      onPress={() => openCourseDetail(c)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={s.codeTag}>
+                        <Text style={s.codeTagText}>{c.code}</Text>
                       </View>
                       <View style={s.courseInfo}>
                         <View style={s.courseInfoTop}>
@@ -261,59 +253,57 @@ export default function StudentScreen({ user, onLogout }) {
                           <View style={[s.progressBar, { width: `${pct}%`, backgroundColor: barColor }]} />
                         </View>
                       </View>
+                      <Text style={s.detailArrow}>›</Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={s.emptyCard}>
+                  <Text style={s.emptyTitle}>No courses enrolled</Text>
+                  <Text style={s.emptyText}>Ask your teacher to enroll you in a course.</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Scan Records / Attendance History Panel */}
+            <View style={s.panel}>
+              <View style={s.panelHeader}>
+                <Text style={s.panelMainTitle}>Attendance History</Text>
+                <Text style={s.panelSubTitle}>Verified scan records</Text>
+              </View>
+
+              {historyLog.length > 0 ? (
+                historyLog.map((item, i) => {
+                  const course = item.sessionId?.courseId || {};
+                  const scanDate = item.scannedAt ? new Date(item.scannedAt).toLocaleDateString() : '—';
+                  return (
+                    <View key={item._id || i} style={[s.historyRow, i === historyLog.length - 1 && { borderBottomWidth: 0 }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.historyCourseTitle}>{course.code || 'CS'} — {course.title || 'Class Session'}</Text>
+                        <Text style={s.historyMeta}>{scanDate} · {course.room || 'Room 302'}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={s.verifiedTag}>Verified ✓</Text>
+                        <Text style={s.historyTime}>{fmt12(item.scannedAt)}</Text>
+                      </View>
                     </View>
                   );
-                })}
-              </View>
-            ) : (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyTitle}>No attendance data</Text>
-                <Text style={s.emptyText}>Enroll in courses and attend sessions to see your attendance.</Text>
-              </View>
-            )}
+                })
+              ) : (
+                <View style={s.emptyCard}>
+                  <Text style={s.emptyTitle}>No scan records yet</Text>
+                  <Text style={s.emptyText}>When you scan classroom QR codes, your history log will appear here.</Text>
+                </View>
+              )}
+            </View>
           </>
         )}
 
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 3 — COURSE DETAILS                           *
+         *  VIEW 2 — PROFILE                                  *
          * ══════════════════════════════════════════════════ */}
-        {activeTab === 'courses' && (
-          <>
-            {courses.length > 0 ? (
-              <View style={s.card}>
-                <Text style={s.sectionTitle}>My Enrolled Courses</Text>
-                {courses.map((c, i) => (
-                  <TouchableOpacity
-                    key={c._id}
-                    style={[s.courseDetailRow, i === courses.length - 1 && { borderBottomWidth: 0 }]}
-                    onPress={() => openCourseDetail(c)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.courseDetailTitle}>{c.title}</Text>
-                      <Text style={s.courseDetailSub}>{c.code} · Section {c.section || 'A'}</Text>
-                      <Text style={s.courseDetailSub}>Schedule: {c.schedule || 'Schedule not set'}</Text>
-                      <Text style={s.courseDetailSub}>Room: {c.room || 'Room TBD'}</Text>
-                      <Text style={s.courseDetailSub}>Faculty: {c.teacherId?.name || 'Faculty'}</Text>
-                    </View>
-                    <Text style={s.detailArrow}>›</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyTitle}>No courses yet</Text>
-                <Text style={s.emptyText}>Ask your teacher to enroll you in a course.</Text>
-              </View>
-            )}
-          </>
-        )}
-
-        {/* ══════════════════════════════════════════════════ *
-         *  TAB 4 — PROFILE                                   *
-         * ══════════════════════════════════════════════════ */}
-        {activeTab === 'profile' && (
-          <View style={s.card}>
+        {activeNav === 'profile' && (
+          <View style={s.panel}>
             <View style={s.profileHeader}>
               <View style={[s.avatarXL, { backgroundColor: palette.blueLight }]}>
                 <Text style={{ color: '#2e5fa1', fontSize: 24, fontWeight: '800' }}>{getInitials(user.name)}</Text>
@@ -345,7 +335,7 @@ export default function StudentScreen({ user, onLogout }) {
         )}
       </ScrollView>
 
-      {/* ── Sidebar Drawer ─────────────────────────────────── */}
+      {/* ── Sidebar Navigation Drawer ──────────────────────── */}
       <Modal visible={drawerOpen} transparent animationType="fade" onRequestClose={() => setDrawerOpen(false)}>
         <View style={s.drawerOverlay}>
           <TouchableOpacity style={s.drawerBackdrop} activeOpacity={1} onPress={() => setDrawerOpen(false)} />
@@ -366,23 +356,21 @@ export default function StudentScreen({ user, onLogout }) {
 
             <View style={s.drawerNav}>
               {[
-                { key: 'scan', label: 'Scan QR Code' },
-                { key: 'attendance', label: 'My Attendance' },
-                { key: 'courses', label: 'My Courses' },
+                { key: 'overview', label: 'Overview' },
                 { key: 'profile', label: 'Profile' },
               ].map(item => (
                 <TouchableOpacity
                   key={item.key}
-                  style={[s.drawerNavItem, activeTab === item.key && s.drawerNavItemActive]}
+                  style={[s.drawerNavItem, activeNav === item.key && s.drawerNavItemActive]}
                   onPress={() => {
-                    setActiveTab(item.key);
+                    setActiveNav(item.key);
                     setDrawerOpen(false);
                   }}
                 >
-                  <Text style={[s.drawerNavText, activeTab === item.key && s.drawerNavTextActive]}>
+                  <Text style={[s.drawerNavText, activeNav === item.key && s.drawerNavTextActive]}>
                     {item.label}
                   </Text>
-                  {activeTab === item.key && <View style={s.activeDot} />}
+                  {activeNav === item.key && <View style={s.activeDot} />}
                 </TouchableOpacity>
               ))}
             </View>
@@ -396,7 +384,7 @@ export default function StudentScreen({ user, onLogout }) {
         </View>
       </Modal>
 
-      {/* ── Scanner modal ──────────────────────────────────── */}
+      {/* ── Scanner Modal ──────────────────────────────────── */}
       <Modal visible={scannerVisible} animationType="slide" onRequestClose={closeScanner}>
         <View style={s.scannerRoot}>
           <View style={s.scannerTopbar}>
@@ -458,7 +446,7 @@ export default function StudentScreen({ user, onLogout }) {
         </View>
       </Modal>
 
-      {/* ── Course detail modal ────────────────────────────── */}
+      {/* ── Course Detail Modal ────────────────────────────── */}
       <Modal visible={!!detailCourse} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setDetailCourse(null)}>
         <View style={s.modalRoot}>
           <View style={s.modalHeader}>
@@ -482,7 +470,6 @@ export default function StudentScreen({ user, onLogout }) {
                   <Text style={s.detailMeta}>Instructor: {detailData.teacherId?.name || 'Faculty'} ({detailData.teacherId?.email || ''})</Text>
                 </View>
 
-                {/* My stats for this course */}
                 {stats[detailData._id] && (
                   <View style={s.detailStatsCard}>
                     <Text style={s.detailStatsTitle}>My Attendance</Text>
@@ -505,10 +492,9 @@ export default function StudentScreen({ user, onLogout }) {
                   </View>
                 )}
 
-                {/* Enrolled classmates */}
                 {detailData.enrolledStudents?.length > 0 && (
-                  <View style={[s.card, { marginTop: 14 }]}>
-                    <Text style={s.sectionTitle}>Classmates ({detailData.enrolledStudents.length})</Text>
+                  <View style={[s.panel, { marginTop: 14 }]}>
+                    <Text style={s.panelMainTitle}>Classmates ({detailData.enrolledStudents.length})</Text>
                     {detailData.enrolledStudents.map((st, i) => {
                       const col = getAvatarColor(st.name || '');
                       return (
@@ -534,15 +520,6 @@ export default function StudentScreen({ user, onLogout }) {
   );
 }
 
-function StatCard({ label, value, color }) {
-  return (
-    <View style={s.statCard}>
-      <Text style={[s.statValue, { color }]}>{value}</Text>
-      <Text style={s.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 /* ── Styles ──────────────────────────────────────────────────── */
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.paper },
@@ -551,25 +528,20 @@ const s = StyleSheet.create({
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   menuBtn: { paddingHorizontal: 8, paddingVertical: 4, marginRight: 2 },
   menuIcon: { fontSize: 22, fontWeight: '700', color: palette.ink },
-  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontWeight: '800', fontSize: 12 },
   brandMark: { width: 32, height: 32, borderRadius: 8, backgroundColor: palette.coral, alignItems: 'center', justifyContent: 'center' },
   brandMarkText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  topTitle: { fontWeight: '800', fontSize: 16, color: palette.ink, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium' },
+  topTitle: { fontWeight: '800', fontSize: 16, color: palette.ink },
   topSub: { color: palette.inkFaint, fontSize: 11, marginTop: 1 },
   logoutBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: palette.border },
   logoutText: { color: palette.inkMuted, fontSize: 12, fontWeight: '700' },
 
-  // Tab bar — blue accent for students
-  tabBar: { flexDirection: 'row', backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border, paddingHorizontal: 4 },
-  tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabItemActive: { borderBottomColor: palette.blue },
-  tabText: { fontSize: 11, fontWeight: '600', color: palette.inkFaint },
-  tabTextActive: { color: '#2e5fa1', fontWeight: '800' },
+  breadcrumbBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border },
+  breadcrumbMuted: { fontSize: 12, color: palette.inkFaint },
+  breadcrumbArrow: { fontSize: 14, color: palette.inkFaint },
+  breadcrumbActive: { fontSize: 12, fontWeight: '800', color: palette.ink },
 
   scroll: { padding: 16, paddingBottom: 40 },
 
-  // Hero
   hero: { backgroundColor: '#1a2f4a', borderRadius: 18, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   heroLeft: { flex: 1 },
   heroEyebrow: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
@@ -579,42 +551,28 @@ const s = StyleSheet.create({
   heroBadgeNum: { color: '#fff', fontWeight: '800', fontSize: 28, letterSpacing: -0.5 },
   heroBadgeLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
 
-  // Stats
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   statCard: { flex: 1, backgroundColor: palette.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: palette.border, alignItems: 'center' },
-  statValue: { fontWeight: '800', fontSize: 26, letterSpacing: -0.5 },
-  statLabel: { color: palette.inkFaint, fontSize: 10, marginTop: 3, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  statLabel: { fontSize: 10, fontWeight: '600', color: palette.inkFaint, textTransform: 'uppercase' },
+  statVal: { fontSize: 24, fontWeight: '800', marginVertical: 4 },
+  statSub: { fontSize: 10, color: palette.inkFaint, fontWeight: '600' },
 
-  // Scan CTA — blue accent
   scanBtn: { backgroundColor: palette.blue, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   scanIconWrap: { width: 46, height: 46, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  scanIconText: { color: '#fff', fontWeight: '800', fontSize: 13, letterSpacing: 0.5 },
+  scanIconText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   scanBtnTextWrap: { flex: 1 },
   scanBtnTitle: { color: '#fff', fontWeight: '800', fontSize: 16 },
   scanBtnSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
   scanArrow: { color: 'rgba(255,255,255,0.6)', fontSize: 28 },
 
-  // Info box
-  infoBox: { flexDirection: 'row', gap: 10, backgroundColor: palette.blueLight, borderRadius: 12, padding: 14, alignItems: 'flex-start' },
-  infoIconText: { fontSize: 13, fontWeight: '800', color: '#2e5fa1', width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: '#2e5fa1', textAlign: 'center', lineHeight: 16 },
-  infoText: { flex: 1, fontSize: 12, color: '#2e5fa1', lineHeight: 18 },
+  panel: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 14, overflow: 'hidden' },
+  panelHeader: { padding: 16, borderBottomWidth: 1, borderBottomColor: palette.border },
+  panelMainTitle: { fontSize: 16, fontWeight: '800', color: palette.ink },
+  panelSubTitle: { fontSize: 12, color: palette.inkFaint, marginTop: 2 },
 
-  // Cards
-  card: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 14, overflow: 'hidden' },
-  sectionTitle: { fontWeight: '800', fontSize: 14, color: palette.ink, padding: 16, paddingBottom: 8 },
-
-  // Summary
-  summaryCard: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 20, marginBottom: 14, alignItems: 'center' },
-  summaryTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  summaryPct: { fontWeight: '800', fontSize: 32, color: palette.ink, letterSpacing: -0.5 },
-  statusDot: { width: 10, height: 10, borderRadius: 5 },
-  statusText: { fontWeight: '700', fontSize: 13 },
-  summarySub: { color: palette.inkFaint, fontSize: 12 },
-
-  // Course attendance rows
-  courseRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 13, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border },
-  codeTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginTop: 2 },
-  codeTagText: { fontWeight: '800', fontSize: 11 },
+  courseRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border },
+  codeTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: palette.blueLight },
+  codeTagText: { fontWeight: '800', fontSize: 11, color: '#2e5fa1' },
   courseInfo: { flex: 1 },
   courseInfoTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   courseTitle: { fontWeight: '700', fontSize: 14, color: palette.ink, flex: 1, marginRight: 8 },
@@ -622,14 +580,18 @@ const s = StyleSheet.create({
   courseSub: { color: palette.inkFaint, fontSize: 11, marginBottom: 8 },
   progressTrack: { height: 5, backgroundColor: palette.border, borderRadius: 3, overflow: 'hidden' },
   progressBar: { height: '100%', borderRadius: 3 },
+  detailArrow: { color: palette.inkFaint, fontSize: 22 },
 
-  // Course detail rows
-  courseDetailRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: palette.border },
-  courseDetailTitle: { fontWeight: '700', fontSize: 15, color: palette.ink, marginBottom: 4 },
-  courseDetailSub: { color: palette.inkMuted, fontSize: 12, marginTop: 1 },
-  detailArrow: { color: palette.inkFaint, fontSize: 24, marginLeft: 10 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: palette.border },
+  historyCourseTitle: { fontSize: 13, fontWeight: '700', color: palette.ink },
+  historyMeta: { fontSize: 11, color: palette.inkFaint, marginTop: 2 },
+  verifiedTag: { fontSize: 11, fontWeight: '800', color: palette.mint },
+  historyTime: { fontSize: 10, color: palette.inkFaint, marginTop: 2 },
 
-  // Profile
+  emptyCard: { padding: 30, alignItems: 'center' },
+  emptyTitle: { fontWeight: '800', fontSize: 15, color: palette.ink, marginBottom: 4 },
+  emptyText: { fontSize: 12, color: palette.inkFaint, textAlign: 'center' },
+
   profileHeader: { alignItems: 'center', padding: 24, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.paper },
   avatarXL: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   profileName: { fontSize: 18, fontWeight: '800', color: palette.ink },
@@ -643,12 +605,6 @@ const s = StyleSheet.create({
   signOutBtn: { backgroundColor: palette.coralLight, paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(242,126,104,.25)' },
   signOutText: { color: palette.coralDark, fontWeight: '800', fontSize: 14 },
 
-  // Empty
-  emptyCard: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, alignItems: 'center', padding: 36, marginBottom: 14 },
-  emptyTitle: { fontWeight: '800', fontSize: 16, color: palette.ink, marginBottom: 6 },
-  emptyText: { color: palette.inkFaint, fontSize: 13, textAlign: 'center' },
-
-  // Drawer Sidebar
   drawerOverlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)' },
   drawerBackdrop: { flex: 1 },
   drawerContent: { width: 280, backgroundColor: palette.surface, height: '100%', borderRightWidth: 1, borderRightColor: palette.border, padding: 20, paddingTop: 56 },
@@ -670,7 +626,6 @@ const s = StyleSheet.create({
   drawerLogoutBtn: { backgroundColor: palette.coralLight, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
   drawerLogoutText: { color: palette.coralDark, fontWeight: '800', fontSize: 14 },
 
-  // Scanner
   scannerRoot: { flex: 1, backgroundColor: '#111' },
   scannerTopbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingTop: 56, backgroundColor: '#1a2f4a' },
   scannerTitle: { color: '#fff', fontWeight: '800', fontSize: 17 },
@@ -693,9 +648,8 @@ const s = StyleSheet.create({
   retryBtn: { backgroundColor: palette.blueLight, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 10 },
   retryText: { color: '#2e5fa1', fontWeight: '800', fontSize: 14 },
 
-  // Course detail modal
   modalRoot: { flex: 1, backgroundColor: palette.paper },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingTop: 20, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingTop: 50, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
   modalTitle: { fontWeight: '800', fontSize: 17, color: palette.ink },
   modalCloseBtn: { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: palette.blueLight, borderRadius: 8 },
   modalCloseText: { color: '#2e5fa1', fontWeight: '800', fontSize: 13 },

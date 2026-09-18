@@ -133,4 +133,14 @@ export const exportAttendanceCsv = async courseId => {
   return res.data;
 };
 
+export const getStudentHistory = async studentId => {
+  const res = await api.get(`/attendance/student/${studentId}/history`);
+  return res.data;
+};
+
+export const getAttendanceHistory = async () => {
+  const res = await api.get('/attendance/history');
+  return res.data;
+};
+
 export default api;
