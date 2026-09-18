@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Attendly",
+    "slug": "attendly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.attendly.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#181e29"
+      },
+      "permissions": [
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Attendly to scan classroom attendance QR codes."
+        }
+      ]
+    ]
+  }
+}

@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f7f2" />
+    <meta name="description" content="Attendly — QR-code based smart attendance for modern classrooms. Start a session, rotate the code every 8 seconds, and see students mark in real time." />
+    <title>Attendly | Smart Attendance</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/socket.io-client@4.7.5/dist/socket.io.min.js"></script>
+    <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
+  </head>
+  <body>
+
+    <!-- =====================================================
+         AUTH OVERLAY
+         ===================================================== -->
+    <div id="auth-overlay">
+      <div class="auth-card">
+        <div class="brand">
+          <span class="brand-mark">A</span>
+          <span>attendly</span>
+        </div>
+        <p class="auth-subtitle">Sign in to manage or mark attendance</p>
+
+        <div class="modal-tabs" id="auth-tabs">
+          <button class="modal-tab active" data-tab="login" id="tab-login">Sign in</button>
+          <button class="modal-tab" data-tab="register" id="tab-register">Register</button>
+        </div>
+
+        <div id="auth-error" class="form-error"></div>
+
+        <!-- Login form -->
+        <form id="login-form">
+          <div class="field">
+            <label for="login-email">Email address</label>
+            <input type="email" id="login-email" placeholder="you@university.edu" autocomplete="email" required />
+          </div>
+          <div class="field">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required />
+          </div>
+          <button type="submit" class="btn-primary" id="login-btn">Sign in</button>
+          <p class="demo-link">
+            Quick demo:
+            <button type="button" id="demo-teacher-btn">Teacher</button> ·
+            <button type="button" id="demo-student-btn">Student</button>
+          </p>
+        </form>
+
+        <!-- Register form -->
+        <form id="register-form" style="display:none">
+          <div class="field">
+            <label for="reg-name">Full name</label>
+            <input type="text" id="reg-name" placeholder="Jane Smith" required />
+          </div>
+          <div class="field">
+            <label for="reg-email">Email address</label>
+            <input type="email" id="reg-email" placeholder="you@university.edu" required />
+          </div>
+          <div class="field">
+            <label for="reg-password">Password</label>
+            <input type="password" id="reg-password" placeholder="At least 8 characters" required minlength="8" />
+          </div>
+          <div class="field">
+            <label for="reg-role">I am a</label>
+            <select id="reg-role">
+              <option value="student">Student</option>
+              <option value="teacher">Teacher</option>
+            </select>
+          </div>
+          <div class="field" id="rollno-field">
+            <label for="reg-rollno">Roll / Student ID</label>
+            <input type="text" id="reg-rollno" placeholder="CS21001" />
+          </div>
+          <button type="submit" class="btn-primary" id="register-btn">Create account</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================
+         TOAST CONTAINER
+         ===================================================== -->
+    <div id="toast-container" aria-live="polite"></div>
+
+    <!-- =====================================================
+         QR SCANNER MODAL (Student)
+         ===================================================== -->
+    <div class="modal-overlay" id="scanner-modal" role="dialog" aria-modal="true" aria-label="QR Scanner">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <h2>Scan QR code</h2>
+            <p>Point your camera at the code displayed in the classroom</p>
+          </div>
+          <button class="modal-close" id="scanner-close" aria-label="Close scanner">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="scanner-wrapper" id="scanner-wrapper">
+            <video id="camera-video" playsinline muted></video>
+            <canvas id="camera-canvas" style="display:none"></canvas>
+            <div class="scan-target">
+              <div class="scan-corner"></div>
+              <div class="scan-line"></div>
+            </div>
+          </div>
+          <p class="scanner-hint" id="scanner-hint">Initialising camera…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================
+         ADD SUBJECT MODAL (Teacher)
+         ===================================================== -->
+    <div class="modal-overlay" id="add-subject-modal" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <h2>Add New Subject</h2>
+            <p>Create a course & assign timetable schedule</p>
+          </div>
+          <button class="modal-close" id="add-subject-close" aria-label="Close">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <form id="add-subject-form">
+            <div class="field">
+              <label for="sub-title">Subject / Course Name</label>
+              <input type="text" id="sub-title" placeholder="e.g. Artificial Intelligence" required />
+            </div>
+            <div class="field">
+              <label for="sub-code">Course Code</label>
+              <input type="text" id="sub-code" placeholder="e.g. CS401" required />
+            </div>
+            <div class="field">
+              <label for="sub-section">Section</label>
+              <input type="text" id="sub-section" placeholder="e.g. Section A" value="Section A" />
+            </div>
+            <div class="field">
+              <label for="sub-room">Room / Hall</label>
+              <input type="text" id="sub-room" placeholder="e.g. Room 302" value="Room 302" />
+            </div>
+            <div class="field">
+              <label for="sub-schedule">Timetable Schedule</label>
+              <input type="text" id="sub-schedule" placeholder="e.g. Mon, Wed • 10:00 AM - 11:30 AM" value="Mon, Wed • 10:00 AM - 11:30 AM" />
+            </div>
+            <button type="submit" class="btn-primary" id="save-subject-btn">Create Subject</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================
+         APP SHELL
+         ===================================================== -->
+    <div class="app-shell">
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">A</span>
+          <span>attendly</span>
+        </div>
+        <div class="workspace-label" id="workspace-role-label">Workspace</div>
+        <nav class="main-nav" id="main-nav" aria-label="Main navigation">
+          <button class="nav-item active" data-view="overview" id="nav-overview">
+            <i data-lucide="layout-dashboard"></i><span>Overview</span>
+          </button>
+          <button class="nav-item" data-view="students" id="nav-students">
+            <i data-lucide="users"></i><span>All Students</span>
+          </button>
+          <button class="nav-item" data-view="timetable" id="nav-timetable">
+            <i data-lucide="calendar"></i><span>Timetable</span>
+          </button>
+          <button class="nav-item" data-view="profile" id="nav-profile">
+            <i data-lucide="user"></i><span>Profile</span>
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="nav-item" id="logout-btn">
+            <i data-lucide="log-out"></i><span>Sign out</span>
+          </button>
+          <div class="profile-mini" id="profile-mini">
+            <div class="avatar avatar-coral" id="user-avatar">--</div>
+            <div>
+              <strong id="user-name-sidebar">Loading…</strong>
+              <small id="user-role-sidebar">—</small>
+            </div>
+            <i data-lucide="chevron-down"></i>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <main class="main-content">
+        <header class="topbar">
+          <div class="mobile-brand">
+            <span class="brand-mark">A</span><span>attendly</span>
+          </div>
+          <div class="breadcrumb">
+            <span>Workspace</span>
+            <i data-lucide="chevron-right"></i>
+            <strong id="breadcrumb-label">Overview</strong>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button" aria-label="Notifications" id="notif-btn">
+              <i data-lucide="bell"></i>
+              <span class="notification-dot" id="notif-dot" style="display:none"></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page-wrap">
+          <!-- Page heading -->
+          <section class="page-heading">
+            <div>
+              <p class="eyebrow" id="date-eyebrow"></p>
+              <h1 id="greeting-heading">Good morning <span class="wave">✦</span></h1>
+              <p class="subheading" id="greeting-sub">Here is what is happening with your classes today.</p>
+            </div>
+          </section>
+
+          <!-- ===========================
+               TEACHER VIEW (OVERVIEW)
+               =========================== -->
+          <div id="teacher-view" class="view-section">
+            <!-- Stats -->
+            <section class="stats-grid">
+              <article class="stat-card">
+                <div class="stat-top">
+                  <span>Classes today</span>
+                  <span class="stat-icon mint"><i data-lucide="calendar-days"></i></span>
+                </div>
+                <strong id="stat-classes">—</strong>
+                <small>Active courses</small>
+              </article>
+              <article class="stat-card">
+                <div class="stat-top">
+                  <span>Avg. attendance</span>
+                  <span class="stat-icon yellow"><i data-lucide="chart-no-axes-combined"></i></span>
+                </div>
+                <strong id="stat-avg">—</strong>
+                <small>Across all sessions</small>
+              </article>
+              <article class="stat-card">
+                <div class="stat-top">
+                  <span>Students enrolled</span>
+                  <span class="stat-icon blue"><i data-lucide="users"></i></span>
+                </div>
+                <strong id="stat-enrolled">—</strong>
+                <small>Across your courses</small>
+              </article>
+              <article class="stat-card accent-stat">
+                <div class="stat-top">
+                  <span>Session status</span>
+                  <span class="live-pill" id="live-pill-stat" style="display:none">
+                    <span></span> Live
+                  </span>
+                </div>
+                <strong id="stat-sessions">00</strong>
+                <small id="stat-sessions-label">No active session</small>
+              </article>
+            </section>
+
+            <!-- Session panel + Roster -->
+            <section class="dashboard-grid">
+              <!-- Session panel -->
+              <article class="session-panel panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="title-with-dot">
+                      <span class="status-dot" id="session-dot" style="display:none"></span>
+                      <span id="session-status-label">No session active</span>
+                    </div>
+                    <h2 id="session-course-title">Select a course to start</h2>
+                    <p class="muted" id="session-course-meta"></p>
+                  </div>
+                  <button class="more-button" aria-label="More options" id="more-btn">
+                    <i data-lucide="more-horizontal"></i>
+                  </button>
+                </div>
+                <!-- Course selector (shown when no session active) -->
+                <div class="course-select-row" id="course-select-row">
+                  <label for="course-select">Course</label>
+                  <select id="course-select">
+                    <option value="">— Loading courses —</option>
+                  </select>
+                  <button class="start-session-btn" id="start-session-btn" disabled>
+                    <i data-lucide="play"></i> Start
+                  </button>
+                </div>
+                <!-- Session body (shown when active) -->
+                <div class="session-body" id="session-body" style="display:none">
+                  <div class="qr-stage">
+                    <div class="qr-frame">
+                      <img id="qr-image" alt="Rotating attendance QR code" src="" />
+                    </div>
+                    <div class="qr-refresh">
+                      <span class="refresh-ring" id="refresh-ring">
+                        <i data-lucide="refresh-cw"></i>
+                      </span>
+                      <span>Refreshes in <strong id="countdown">08</strong>s</span>
+                    </div>
+                  </div>
+                  <div class="session-copy">
+                    <div class="session-label">SCAN TO MARK ATTENDANCE</div>
+                    <h3>Hold your camera<br />over the code</h3>
+                    <p>Only the current code works. It refreshes automatically every 8 seconds to keep attendance secure.</p>
+                    <div class="session-meta">
+                      <div>
+                        <span>Started</span>
+                        <strong id="session-start-time">—</strong>
+                      </div>
+                      <div>
+                        <span>Present</span>
+                        <strong id="present-count">0 <em>/ —</em></strong>
+                      </div>
+                    </div>
+                    <button class="stop-button" id="stop-session">
+                      <i data-lucide="square"></i> End session
+                    </button>
+                  </div>
+                </div>
+              </article>
+
+              <!-- Roster panel -->
+              <article class="roster-panel panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="title-with-dot">
+                      <span class="blue-dot"></span>
+                      <span>Live attendance</span>
+                    </div>
+                    <h2>Today's roster</h2>
+                  </div>
+                  <button class="export-button" id="export-csv">
+                    <i data-lucide="download"></i> Export CSV
+                  </button>
+                </div>
+                <div class="roster-summary">
+                  <div>
+                    <strong id="roster-count">0</strong>
+                    <span>present</span>
+                  </div>
+                  <div class="progress-track">
+                    <span id="roster-progress" style="width:0%"></span>
+                  </div>
+                  <span class="roster-total" id="roster-total">of — students</span>
+                </div>
+                <div class="student-list" id="student-list"></div>
+                <button class="full-roster">View full roster <i data-lucide="arrow-up-right"></i></button>
+              </article>
+            </section>
+
+            <!-- Lower: Schedule + Insight -->
+            <section class="lower-grid">
+              <article class="panel upcoming">
+                <div class="panel-header">
+                  <div>
+                    <div class="title-with-dot">
+                      <i data-lucide="clock-3" class="heading-icon"></i>
+                      <span>Courses</span>
+                    </div>
+                    <h2>Your courses</h2>
+                  </div>
+                </div>
+                <div id="course-schedule-list"></div>
+              </article>
+              <article class="panel insight">
+                <div class="insight-orbit"><i data-lucide="sparkles"></i></div>
+                <p class="eyebrow">QUICK INSIGHT</p>
+                <h2>QR attendance<br /><span>refreshes every 8s.</span></h2>
+                <p>Short-lived tokens make screenshots useless for proxy attendance. Students must be present to scan the live code.</p>
+                <button class="text-button">Learn more <i data-lucide="arrow-up-right"></i></button>
+              </article>
+            </section>
+          </div>
+
+          <!-- ===========================
+               STUDENTS DIRECTORY VIEW
+               =========================== -->
+          <div id="students-view" class="view-section hidden">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="title-with-dot">
+                    <span class="blue-dot"></span>
+                    <span>Directory & Attendance</span>
+                  </div>
+                  <h2>All Registered Students</h2>
+                </div>
+                <div class="search-box">
+                  <input type="text" id="students-search" placeholder="Search by name or roll number..." />
+                </div>
+              </div>
+              <div class="students-grid-wrap" id="students-grid">
+                <div style="padding:20px;text-align:center;color:var(--ink-faint)">Loading students directory…</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- =====================================================
+               STUDENT ATTENDANCE HISTORY MODAL (Teacher View)
+               ===================================================== -->
+          <div class="modal-overlay" id="student-detail-modal" role="dialog" aria-modal="true">
+            <div class="modal" style="max-width: 650px;">
+              <div class="modal-header">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div class="avatar avatar-coral avatar-lg" id="modal-student-avatar">ST</div>
+                  <div>
+                    <h2 id="modal-student-name">Student Name</h2>
+                    <p id="modal-student-meta">Roll No: CS21001 · student@attendly.edu</p>
+                  </div>
+                </div>
+                <button class="modal-close" id="student-detail-close" aria-label="Close">
+                  <i data-lucide="x"></i>
+                </button>
+              </div>
+              <div class="modal-body" style="padding: 20px;">
+                <!-- Attendance Stats summary -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+                  <div style="background:var(--paper);padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border)">
+                    <span style="font-size:11px;color:var(--ink-faint)">Overall Attendance</span>
+                    <strong style="display:block;font-size:1.8rem;color:var(--mint-dark);font-family:'Space Grotesk',sans-serif;margin-top:2px" id="modal-student-pct">0.0%</strong>
+                  </div>
+                  <div style="background:var(--paper);padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border)">
+                    <span style="font-size:11px;color:var(--ink-faint)">Sessions Attended</span>
+                    <strong style="display:block;font-size:1.8rem;color:var(--ink);font-family:'Space Grotesk',sans-serif;margin-top:2px" id="modal-student-sessions">0 / 0</strong>
+                  </div>
+                </div>
+
+                <!-- Course Breakdown -->
+                <h4 style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--ink)">Course Breakdown</h4>
+                <div id="modal-student-courses" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px"></div>
+
+                <!-- Past Attendance History Log -->
+                <h4 style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--ink)">Past Attendance History Log</h4>
+                <div id="modal-student-history" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===========================
+               TIMETABLE & SUBJECTS VIEW
+               =========================== -->
+          <div id="timetable-view" class="view-section hidden">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="title-with-dot">
+                    <i data-lucide="calendar" class="heading-icon"></i>
+                    <span>Schedule</span>
+                  </div>
+                  <h2>Class Timetable & Subjects</h2>
+                </div>
+                <button class="btn-primary" id="open-add-subject-modal" style="width:auto; padding: 8px 16px; font-size: 13px;">
+                  + Add Subject
+                </button>
+              </div>
+              <div class="timetable-grid" id="timetable-grid">
+                <div style="padding:20px;text-align:center;color:var(--ink-faint)">Loading timetable…</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ===========================
+               PROFILE VIEW
+               =========================== -->
+          <div id="profile-view" class="view-section hidden">
+            <section class="panel profile-panel">
+              <div class="profile-header-card">
+                <div class="avatar avatar-coral avatar-lg" id="profile-avatar-large" style="width:56px;height:56px;font-size:20px">--</div>
+                <div class="profile-header-info">
+                  <h2 id="profile-full-name">User Name</h2>
+                  <p id="profile-email-label" class="muted">user@attendly.edu</p>
+                  <span class="badge" id="profile-role-badge">Student</span>
+                </div>
+              </div>
+              <div class="profile-details-form">
+                <form id="profile-form">
+                  <div class="field">
+                    <label for="profile-input-name">Full Name</label>
+                    <input type="text" id="profile-input-name" required />
+                  </div>
+                  <div class="field">
+                    <label for="profile-input-email">Email Address</label>
+                    <input type="email" id="profile-input-email" required />
+                  </div>
+                  <div class="field" id="profile-rollno-group">
+                    <label for="profile-input-rollno">Roll / Student ID Number</label>
+                    <input type="text" id="profile-input-rollno" />
+                  </div>
+                  <div class="profile-actions-row">
+                    <button type="submit" class="btn-primary" style="width:auto; padding: 10px 24px;">Save Profile</button>
+                    <button type="button" class="stop-button" id="profile-logout-btn" style="width:auto; padding: 10px 24px;">
+                      <i data-lucide="log-out"></i> Logout
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </section>
+          </div>
+
+          <!-- ===========================
+               STUDENT VIEW
+               =========================== -->
+          <div id="student-view" class="student-view view-section hidden">
+            <div class="student-hero">
+              <div>
+                <p class="eyebrow">STUDENT CONSOLE</p>
+                <h2 id="student-greeting">Welcome back!</h2>
+                <p id="student-sub">Your attendance is synced with the server.</p>
+              </div>
+              <div class="streak-badge">
+                <span>Overall</span>
+                <strong id="student-overall-pct">—%</strong>
+                <i data-lucide="flame"></i>
+              </div>
+            </div>
+            <section class="student-stats">
+              <article class="student-total">
+                <span>Overall attendance</span>
+                <strong id="stu-pct">—%</strong>
+                <p><span class="up" id="stu-pct-label">Loading…</span></p>
+              </article>
+              <article>
+                <span>Courses enrolled</span>
+                <strong id="stu-courses">—</strong>
+                <p>Active this semester</p>
+              </article>
+              <article>
+                <span>Status</span>
+                <strong id="stu-status">—</strong>
+                <p id="stu-status-label">—</p>
+              </article>
+            </section>
+
+            <!-- Scan button -->
+            <button id="scan-btn">
+              <div class="scan-icon-wrap"><i data-lucide="scan-line"></i></div>
+              <div class="scan-btn-text">
+                <strong>Mark attendance</strong>
+                <span>Scan the live classroom QR code</span>
+              </div>
+              <i data-lucide="chevron-right" class="arrow-icon"></i>
+            </button>
+
+            <!-- Courses attendance -->
+            <section class="panel courses-panel">
+              <div class="panel-header">
+                <div>
+                  <div class="title-with-dot">
+                    <span class="blue-dot"></span>
+                    <span>My courses</span>
+                  </div>
+                  <h2>Attendance by course</h2>
+                </div>
+                <button class="text-button" id="refresh-student-btn">
+                  <i data-lucide="refresh-cw"></i> Refresh
+                </button>
+              </div>
+              <div class="course-list" id="student-course-list">
+                <div style="padding:20px;text-align:center;color:var(--ink-faint);font-size:13px">Loading courses…</div>
+              </div>
+            </section>
+
+            <!-- Attendance History Log -->
+            <section class="panel history-panel" style="margin-top:20px" id="history-panel">
+              <div class="panel-header">
+                <div>
+                  <div class="title-with-dot">
+                    <i data-lucide="history" class="heading-icon"></i>
+                    <span>Scan Records</span>
+                  </div>
+                  <h2>Attendance History</h2>
+                </div>
+              </div>
+              <div id="student-history-list" style="padding:16px 20px">
+                <div style="padding:20px;text-align:center;color:var(--ink-faint);font-size:13px">Loading history log…</div>
+              </div>
+            </section>
+          </div>
+
+          <footer>
+            <span>Attendly v1.0</span>
+            <span>Secure attendance, made simple.</span>
+          </footer>
+        </div>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

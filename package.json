@@ -1,0 +1,9 @@
+{
+  "name": "attendly-mern-mobile",
+  "private": true,
+  "scripts": {
+    "server": "npm --prefix server run dev",
+    "mobile": "npm --prefix mobile start",
+    "check": "npm --prefix server run check"
+  }
+}
