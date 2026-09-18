@@ -946,17 +946,19 @@ footer {
 /* Mobile 3-line Menu & Drawer Backdrop */
 .mobile-menu-toggle {
   display: none;
-  background: transparent;
-  border: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
   cursor: pointer;
   color: var(--ink);
-  padding: 6px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-sm);
   align-items: center;
   justify-content: center;
-  margin-right: 8px;
+  flex-shrink: 0;
+  margin-right: 6px;
 }
-.mobile-menu-toggle svg { width: 20px; height: 20px; }
+.mobile-menu-toggle svg { width: 22px; height: 22px; stroke: var(--ink); }
 
 .sidebar-backdrop {
   display: none;
@@ -979,7 +981,7 @@ footer {
   .lower-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
-  .mobile-menu-toggle { display: flex; }
+  .mobile-menu-toggle { display: flex !important; }
   .sidebar {
     display: flex;
     position: fixed;
