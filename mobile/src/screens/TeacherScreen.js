@@ -10,6 +10,7 @@ import { palette, getInitials, getAvatarColor, fmt12 } from '../theme';
 import {
   getCourses, startSession, stopSession, getSocketUrl,
   getStudents, createCourse, updateProfile, exportAttendanceCsv,
+  getSessionRoster,
 } from '../api';
 
 const QR_TTL = 8;
@@ -26,6 +27,7 @@ export default function TeacherScreen({ user, token, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [showAddCourseModal, setShowAddCourseModal] = useState(false);
   const [exporting, setExporting] = useState(null); // courseId being exported
@@ -72,26 +74,45 @@ export default function TeacherScreen({ user, token, onLogout }) {
     }, 500);
   }, []);
 
+  const fetchCurrentRoster = useCallback(async (sessionId) => {
+    try {
+      const data = await getSessionRoster(sessionId);
+      if (data?.students) {
+        setRoster(data.students);
+      }
+    } catch { /* silent */ }
+  }, []);
+
   const connectSocket = useCallback(sessionId => {
     if (socketRef.current) socketRef.current.disconnect();
     const socket = io(getSocketUrl(), {
       auth: { token: `Bearer ${token}` },
       transports: ['websocket', 'polling'],
     });
-    socket.on('connect', () => socket.emit('session:join', sessionId));
+
+    const joinRoom = () => socket.emit('session:join', sessionId);
+    socket.on('connect', joinRoom);
+    if (socket.connected) joinRoom();
+
     socket.on('session:token', p => {
       setQrPayload(JSON.stringify({ sessionId: p.sessionId, token: p.token }));
       startCountdown(p.expiresAt);
     });
+
     socket.on('attendance:marked', p => {
+      const att = p.attendance || p;
+      if (!att || !att.studentId) return;
       setRoster(prev => {
-        const att = p.attendance || p;
-        if (prev.find(r => r._id === att._id)) return prev;
+        const stuId = att.studentId._id || att.studentId;
+        const exists = prev.some(r => r._id === att._id || (r.studentId?._id || r.studentId) === stuId);
+        if (exists) return prev;
         return [att, ...prev];
       });
     });
+
     socketRef.current = socket;
-  }, [token, startCountdown]);
+    fetchCurrentRoster(sessionId);
+  }, [token, startCountdown, fetchCurrentRoster]);
 
   /* ── Session actions ───────────────────────────────────────── */
   const handleStart = async () => {
@@ -181,6 +202,9 @@ export default function TeacherScreen({ user, token, onLogout }) {
       {/* ── Top bar ────────────────────────────────────────── */}
       <View style={s.topbar}>
         <View style={s.topLeft}>
+          <TouchableOpacity style={s.menuBtn} onPress={() => setDrawerOpen(true)}>
+            <Text style={s.menuIcon}>☰</Text>
+          </TouchableOpacity>
           <View style={s.brandMark}><Text style={s.brandMarkText}>A</Text></View>
           <View>
             <Text style={s.topTitle}>Teacher Console</Text>
@@ -195,10 +219,10 @@ export default function TeacherScreen({ user, token, onLogout }) {
       {/* ── Tab bar ────────────────────────────────────────── */}
       <View style={s.tabBar}>
         {[
-          { key: 'courses', label: '📚 Courses' },
-          { key: 'session', label: '⚡ Live' },
-          { key: 'export', label: '📤 Export' },
-          { key: 'profile', label: '👤 Profile' },
+          { key: 'courses', label: 'Courses' },
+          { key: 'session', label: 'Live Session' },
+          { key: 'export', label: 'Export Data' },
+          { key: 'profile', label: 'Profile' },
         ].map(t => (
           <TouchableOpacity key={t.key} style={[s.tabItem, activeTab === t.key && s.tabItemActive]} onPress={() => setActiveTab(t.key)}>
             <Text style={[s.tabText, activeTab === t.key && s.tabTextActive]}>{t.label}</Text>
@@ -211,7 +235,7 @@ export default function TeacherScreen({ user, token, onLogout }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCourses(); fetchStudents(); }} tintColor={palette.coral} />}
       >
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 1 — COURSE MANAGEMENT (Teacher-only: FR-2)   *
+         *  TAB 1 — COURSE MANAGEMENT                         *
          * ══════════════════════════════════════════════════ */}
         {activeTab === 'courses' && (
           <>
@@ -223,7 +247,7 @@ export default function TeacherScreen({ user, token, onLogout }) {
 
             {/* Create course button */}
             <TouchableOpacity style={s.createBtn} onPress={() => setShowAddCourseModal(true)} activeOpacity={0.85}>
-              <Text style={s.createBtnIcon}>＋</Text>
+              <Text style={s.createBtnIcon}>+</Text>
               <View style={{ flex: 1 }}>
                 <Text style={s.createBtnTitle}>Create New Course</Text>
                 <Text style={s.createBtnSub}>Add a subject to your teaching roster</Text>
@@ -249,113 +273,92 @@ export default function TeacherScreen({ user, token, onLogout }) {
                       <View style={[s.codeTag, { backgroundColor: tc.bg }]}>
                         <Text style={[s.codeTagText, { color: tc.fg }]}>{c.code}</Text>
                       </View>
-                      <View style={{ flex: 1 }}>
+                      <View style={s.courseInfo}>
                         <Text style={s.courseTitle}>{c.title}</Text>
-                        <Text style={s.courseSub}>Section {c.section || 'A'} · {c.room || 'TBD'}</Text>
-                        <Text style={s.courseSub}>🕒 {c.schedule || 'Schedule not set'}</Text>
-                        <View style={s.enrollPill}>
-                          <Text style={s.enrollText}>👥 {enrollCount} student{enrollCount !== 1 ? 's' : ''} enrolled</Text>
-                        </View>
+                        <Text style={s.courseMeta}>Section {c.section || 'A'} · {c.room || 'Room TBD'} · {enrollCount} student{enrollCount !== 1 ? 's' : ''}</Text>
+                        <Text style={s.courseMeta}>{c.schedule || 'Schedule not set'}</Text>
                       </View>
+                      <TouchableOpacity
+                        style={[s.startBtn, activeCourse?._id === c._id && s.startBtnActive]}
+                        onPress={() => { setActiveCourse(c); setActiveTab('session'); }}
+                      >
+                        <Text style={[s.startBtnText, activeCourse?._id === c._id && s.startBtnTextActive]}>
+                          {session && activeCourse?._id === c._id ? 'Live' : 'Select'}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   );
                 })}
               </View>
             ) : (
               <View style={s.emptyCard}>
-                <Text style={s.emptyIcon}>📚</Text>
                 <Text style={s.emptyTitle}>No courses yet</Text>
-                <Text style={s.emptyText}>Create your first course to get started.</Text>
-              </View>
-            )}
-
-            {/* Students directory */}
-            {students.length > 0 && (
-              <View style={s.card}>
-                <Text style={s.sectionTitle}>Registered Students ({students.length})</Text>
-                {students.map((st, i) => {
-                  const col = getAvatarColor(st.name);
-                  const pct = st.overallPct ?? 100;
-                  return (
-                    <TouchableOpacity
-                      key={st.id || i}
-                      style={[s.studentRow, i === students.length - 1 && { borderBottomWidth: 0 }]}
-                      onPress={() => {
-                        Alert.alert(
-                          `📊 ${st.name} — Attendance`,
-                          `Roll No: ${st.rollNo || 'N/A'}\nEmail: ${st.email}\n\n` +
-                          `Overall Attendance: ${pct.toFixed(1)}%\n` +
-                          `Sessions Attended: ${st.attendedSessions || 0} / ${st.totalSessions || 0}\n` +
-                          `Enrolled Courses: ${st.coursesCount || 0}`
-                        );
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[s.avatarSm, { backgroundColor: col.bg }]}>
-                        <Text style={[s.avatarSmText, { color: col.fg }]}>{getInitials(st.name)}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={s.studentName}>{st.name}</Text>
-                          <Text style={{ fontSize: 11, fontWeight: '800', color: pct >= 85 ? palette.mint : pct >= 75 ? palette.blue : palette.coral }}>
-                            {pct.toFixed(1)}%
-                          </Text>
-                        </View>
-                        <Text style={s.studentSub}>{st.rollNo || 'No Roll'} · {st.email}</Text>
-                        <Text style={{ fontSize: 10, color: palette.inkFaint, marginTop: 2 }}>
-                          {st.attendedSessions || 0} of {st.totalSessions || 0} sessions attended · Tap for history
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                <Text style={s.emptyText}>Create your first course to start taking attendance.</Text>
               </View>
             )}
           </>
         )}
 
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 2 — LIVE SESSION (FR-3, FR-4, FR-9)          *
+         *  TAB 2 — LIVE SESSION                              *
          * ══════════════════════════════════════════════════ */}
         {activeTab === 'session' && (
           <>
+            {/* Course Selector */}
             <View style={s.card}>
-              <View style={s.cardHeader}>
-                <View style={s.cardHeaderLeft}>
-                  {session && <View style={s.liveDot} />}
-                  <Text style={s.cardHeaderLabel}>{session ? 'Live session' : 'Start a session'}</Text>
+              <Text style={s.sectionTitle}>Active Course</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  {courses.map(c => (
+                    <TouchableOpacity
+                      key={c._id}
+                      disabled={!!session}
+                      style={[s.coursePill, activeCourse?._id === c._id && s.coursePillActive]}
+                      onPress={() => setActiveCourse(c)}
+                    >
+                      <Text style={[s.coursePillCode, activeCourse?._id === c._id && s.coursePillCodeActive]}>{c.code}</Text>
+                      <Text style={[s.coursePillTitle, activeCourse?._id === c._id && s.coursePillTitleActive]} numberOfLines={1}>{c.title}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-                {session && (
-                  <TouchableOpacity onPress={handleStop} style={s.stopBtn}>
-                    <Text style={s.stopBtnText}>■ End</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              </ScrollView>
+            </View>
 
-              {!session && (
+            {/* Session Controls / QR Display */}
+            <View style={s.card}>
+              {!session ? (
+                <View style={s.startBox}>
+                  <Text style={s.startBoxTitle}>Ready to take attendance?</Text>
+                  <Text style={s.startBoxSub}>
+                    {activeCourse ? `Selected: ${activeCourse.title} (${activeCourse.code})` : 'Select a course above'}
+                  </Text>
+                  <TouchableOpacity
+                    style={[s.heroStartBtn, !activeCourse && { opacity: 0.5 }]}
+                    disabled={!activeCourse || starting}
+                    onPress={handleStart}
+                  >
+                    {starting ? <ActivityIndicator color="#fff" /> : <Text style={s.heroStartBtnText}>Start Attendance Session</Text>}
+                  </TouchableOpacity>
+                </View>
+              ) : (
                 <>
-                  <TouchableOpacity style={s.coursePickerBtn} onPress={() => setShowCourseModal(true)} activeOpacity={0.75}>
-                    <View style={s.coursePickerLeft}>
-                      <Text style={s.coursePickerCode}>{activeCourse?.code || '—'}</Text>
-                      <Text style={s.coursePickerTitle} numberOfLines={1}>{activeCourse?.title || 'Select a course'}</Text>
+                  <View style={s.liveHeader}>
+                    <View style={s.liveHeaderLeft}>
+                      <View style={s.liveDot} />
+                      <Text style={s.liveHeaderTitle}>Session Active</Text>
                     </View>
-                    <Text style={s.chevron}>›</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[s.startBtn, (starting || !activeCourse) && { opacity: 0.5 }]} onPress={handleStart} disabled={starting || !activeCourse} activeOpacity={0.8}>
-                    <Text style={s.startBtnText}>{starting ? 'Starting…' : '▶  Start attendance session'}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                    <TouchableOpacity style={s.stopBtn} onPress={handleStop}>
+                      <Text style={s.stopBtnText}>End Session</Text>
+                    </TouchableOpacity>
+                  </View>
 
-              {session && !!qrPayload && (
-                <>
-                  <Text style={s.sessionCourse}>{activeCourse?.title} · {activeCourse?.code}</Text>
-                  <Text style={s.sessionMeta}>Section {activeCourse?.section || 'A'} · {activeCourse?.room || 'Room TBD'}</Text>
-
-                  {/* QR Display (FR-3, FR-4) */}
-                  <View style={s.qrContainer}>
-                    <View style={s.qrFrame}>
-                      <QRCode value={qrPayload} size={180} color={palette.ink} backgroundColor={palette.paper} />
+                  <View style={s.qrBox}>
+                    <View style={s.qrWrap}>
+                      {qrPayload ? (
+                        <QRCode value={qrPayload} size={200} color={palette.ink} backgroundColor="#fff" />
+                      ) : (
+                        <ActivityIndicator color={palette.coral} />
+                      )}
                     </View>
                     <View style={s.qrMeta}>
                       <View style={s.countdownBadge}>
@@ -376,7 +379,7 @@ export default function TeacherScreen({ user, token, onLogout }) {
               )}
             </View>
 
-            {/* Live Attendance Dashboard (FR-9) */}
+            {/* Live Attendance Dashboard */}
             {session && roster.length > 0 && (
               <View style={s.card}>
                 <Text style={s.sectionTitle}>Live Attendance Dashboard</Text>
@@ -409,53 +412,45 @@ export default function TeacherScreen({ user, token, onLogout }) {
 
             {session && roster.length === 0 && (
               <View style={s.emptyCard}>
-                <Text style={s.emptyIcon}>📡</Text>
                 <Text style={s.emptyTitle}>Waiting for students…</Text>
-                <Text style={s.emptyText}>Students will appear here as they scan the QR code.</Text>
+                <Text style={s.emptyText}>Students will appear here in real time as they scan the QR code.</Text>
               </View>
             )}
           </>
         )}
 
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 3 — EXPORT ATTENDANCE (FR-11)                *
+         *  TAB 3 — EXPORT DATA                               *
          * ══════════════════════════════════════════════════ */}
         {activeTab === 'export' && (
-          <>
-            <View style={s.exportHeader}>
-              <Text style={s.exportHeaderIcon}>📤</Text>
-              <Text style={s.exportHeaderTitle}>Export Attendance</Text>
-              <Text style={s.exportHeaderSub}>Download attendance records as CSV for any of your courses</Text>
-            </View>
-
-            {courses.length === 0 ? (
-              <View style={s.emptyCard}>
-                <Text style={s.emptyIcon}>📭</Text>
-                <Text style={s.emptyTitle}>No courses to export</Text>
-                <Text style={s.emptyText}>Create a course and run sessions first.</Text>
-              </View>
-            ) : (
+          <View style={s.card}>
+            <Text style={s.sectionTitle}>Export Attendance Reports</Text>
+            {courses.length > 0 ? (
               courses.map((c, i) => (
-                <View key={c._id} style={s.exportRow}>
+                <View key={c._id} style={[s.exportRow, i === courses.length - 1 && { borderBottomWidth: 0 }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.exportCourseTitle}>{c.title}</Text>
                     <Text style={s.exportCourseSub}>{c.code} · Section {c.section || 'A'}</Text>
                   </View>
                   <TouchableOpacity
-                    style={[s.exportBtn, exporting === c._id && { opacity: 0.5 }]}
-                    onPress={() => handleExport(c)}
+                    style={s.exportBtn}
                     disabled={exporting === c._id}
-                    activeOpacity={0.8}
+                    onPress={() => handleExport(c)}
                   >
-                    {exporting === c._id
-                      ? <ActivityIndicator color="#fff" size="small" />
-                      : <Text style={s.exportBtnText}>⬇ CSV</Text>
-                    }
+                    {exporting === c._id ? (
+                      <ActivityIndicator color={palette.coral} size="small" />
+                    ) : (
+                      <Text style={s.exportBtnText}>Export CSV</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               ))
+            ) : (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={s.emptyText}>No courses to export.</Text>
+              </View>
             )}
-          </>
+          </View>
         )}
 
         {/* ══════════════════════════════════════════════════ *
@@ -469,7 +464,7 @@ export default function TeacherScreen({ user, token, onLogout }) {
               </View>
               <Text style={s.profileName}>{user.name}</Text>
               <Text style={s.profileEmail}>{user.email}</Text>
-              <View style={s.roleBadge}><Text style={s.roleBadgeText}>TEACHER ACCOUNT</Text></View>
+              <View style={s.roleBadge}><Text style={s.roleBadgeText}>FACULTY ACCOUNT</Text></View>
             </View>
 
             <View style={{ padding: 16 }}>
@@ -479,8 +474,8 @@ export default function TeacherScreen({ user, token, onLogout }) {
               <Text style={s.fieldLabel}>Email Address</Text>
               <TextInput style={s.input} value={profileEmail} onChangeText={setProfileEmail} keyboardType="email-address" />
 
-              <TouchableOpacity style={[s.startBtn, { marginTop: 14 }]} onPress={handleSaveProfile} disabled={profileSaving}>
-                <Text style={s.startBtnText}>{profileSaving ? 'Saving...' : 'Save Profile'}</Text>
+              <TouchableOpacity style={[s.saveBtn, { marginTop: 14 }]} onPress={handleSaveProfile} disabled={profileSaving}>
+                <Text style={s.saveBtnText}>{profileSaving ? 'Saving...' : 'Save Profile'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={[s.signOutBtn, { marginTop: 16 }]} onPress={onLogout}>
@@ -491,61 +486,82 @@ export default function TeacherScreen({ user, token, onLogout }) {
         )}
       </ScrollView>
 
-      {/* ── Course picker modal ────────────────────────────── */}
-      <Modal visible={showCourseModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCourseModal(false)}>
-        <View style={s.modalRoot}>
-          <View style={s.modalHeader}>
-            <Text style={s.modalTitle}>Select course</Text>
-            <TouchableOpacity onPress={() => setShowCourseModal(false)} style={s.modalCloseBtn}>
-              <Text style={s.modalCloseText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView>
-            {courses.map((c, i) => (
-              <TouchableOpacity key={c._id} style={s.modalRow} onPress={() => { setActiveCourse(c); setShowCourseModal(false); }} activeOpacity={0.7}>
-                <View style={[s.codeTag, { backgroundColor: [palette.coralLight, palette.mintLight, palette.blueLight][i % 3] }]}>
-                  <Text style={s.codeTagText}>{c.code}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.courseRowTitle}>{c.title}</Text>
-                  <Text style={s.courseRowSub}>Section {c.section || 'A'} · {c.room || 'TBD'}</Text>
-                </View>
-                {activeCourse?._id === c._id && <Text style={{ color: palette.coral, fontWeight: '800' }}>✓</Text>}
+      {/* ── Sidebar Drawer ─────────────────────────────────── */}
+      <Modal visible={drawerOpen} transparent animationType="fade" onRequestClose={() => setDrawerOpen(false)}>
+        <View style={s.drawerOverlay}>
+          <TouchableOpacity style={s.drawerBackdrop} activeOpacity={1} onPress={() => setDrawerOpen(false)} />
+          <View style={s.drawerContent}>
+            <View style={s.drawerHeader}>
+              <View style={[s.drawerAvatar, { backgroundColor: palette.coralLight }]}>
+                <Text style={s.drawerAvatarText}>{getInitials(user.name)}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.drawerTitle}>attendly</Text>
+                <Text style={s.drawerUser}>{user.name}</Text>
+                <Text style={s.drawerRole}>FACULTY</Text>
+              </View>
+              <TouchableOpacity onPress={() => setDrawerOpen(false)} style={s.drawerCloseBtn}>
+                <Text style={s.drawerCloseText}>✕</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            </View>
+
+            <View style={s.drawerNav}>
+              {[
+                { key: 'courses', label: 'My Courses' },
+                { key: 'session', label: 'Live Session' },
+                { key: 'export', label: 'Export Data' },
+                { key: 'profile', label: 'Profile' },
+              ].map(item => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[s.drawerNavItem, activeTab === item.key && s.drawerNavItemActive]}
+                  onPress={() => {
+                    setActiveTab(item.key);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <Text style={[s.drawerNavText, activeTab === item.key && s.drawerNavTextActive]}>
+                    {item.label}
+                  </Text>
+                  {activeTab === item.key && <View style={s.activeDot} />}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={s.drawerFooter}>
+              <TouchableOpacity style={s.drawerLogoutBtn} onPress={() => { setDrawerOpen(false); onLogout(); }}>
+                <Text style={s.drawerLogoutText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
 
-      {/* ── Create course modal ────────────────────────────── */}
-      <Modal visible={showAddCourseModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAddCourseModal(false)}>
-        <View style={s.modalRoot}>
-          <View style={s.modalHeader}>
-            <Text style={s.modalTitle}>Create New Course</Text>
-            <TouchableOpacity onPress={() => setShowAddCourseModal(false)} style={s.modalCloseBtn}>
-              <Text style={s.modalCloseText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={{ padding: 18 }}>
-            <Text style={s.fieldLabel}>Course / Subject Name</Text>
-            <TextInput style={s.input} placeholder="e.g. Artificial Intelligence" placeholderTextColor={palette.inkFaint} value={formTitle} onChangeText={setFormTitle} />
-
+      {/* ── Add Course Modal ───────────────────────────────── */}
+      <Modal visible={showAddCourseModal} animationType="slide" transparent onRequestClose={() => setShowAddCourseModal(false)}>
+        <View style={s.modalBackdrop}>
+          <View style={s.modalCard}>
+            <Text style={s.modalCardTitle}>Create New Course</Text>
+            <Text style={s.fieldLabel}>Course Title</Text>
+            <TextInput style={s.input} placeholder="e.g. Data Structures" value={formTitle} onChangeText={setFormTitle} />
             <Text style={s.fieldLabel}>Course Code</Text>
-            <TextInput style={s.input} placeholder="e.g. CS401" placeholderTextColor={palette.inkFaint} value={formCode} onChangeText={setFormCode} />
-
+            <TextInput style={s.input} placeholder="e.g. CS201" value={formCode} onChangeText={setFormCode} autoCapitalize="characters" />
             <Text style={s.fieldLabel}>Section</Text>
-            <TextInput style={s.input} placeholder="e.g. Section A" placeholderTextColor={palette.inkFaint} value={formSection} onChangeText={setFormSection} />
-
-            <Text style={s.fieldLabel}>Room / Hall</Text>
-            <TextInput style={s.input} placeholder="e.g. Room 302" placeholderTextColor={palette.inkFaint} value={formRoom} onChangeText={setFormRoom} />
-
+            <TextInput style={s.input} placeholder="e.g. A" value={formSection} onChangeText={setFormSection} />
+            <Text style={s.fieldLabel}>Room / Venue</Text>
+            <TextInput style={s.input} placeholder="e.g. Room 101" value={formRoom} onChangeText={setFormRoom} />
             <Text style={s.fieldLabel}>Schedule</Text>
-            <TextInput style={s.input} placeholder="e.g. Mon, Wed • 10:00 AM" placeholderTextColor={palette.inkFaint} value={formSchedule} onChangeText={setFormSchedule} />
+            <TextInput style={s.input} placeholder="e.g. Mon, Wed • 09:00 AM" value={formSchedule} onChangeText={setFormSchedule} />
 
-            <TouchableOpacity style={[s.startBtn, { marginTop: 16 }]} onPress={handleCreateCourse} disabled={formSaving}>
-              <Text style={s.startBtnText}>{formSaving ? 'Creating...' : 'Create Course'}</Text>
-            </TouchableOpacity>
-          </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <TouchableOpacity style={s.modalCancelBtn} onPress={() => setShowAddCourseModal(false)}>
+                <Text style={s.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.modalSaveBtn} onPress={handleCreateCourse} disabled={formSaving}>
+                <Text style={s.modalSaveText}>{formSaving ? 'Creating...' : 'Create Course'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -565,11 +581,13 @@ function StatCard({ label, value, color }) {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.paper },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.paper },
-  topbar: { backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, paddingTop: 52 },
+  topbar: { backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, paddingTop: 52 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandMark: { backgroundColor: palette.coral, width: 32, height: 32, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  menuBtn: { paddingHorizontal: 8, paddingVertical: 4, marginRight: 2 },
+  menuIcon: { fontSize: 22, fontWeight: '700', color: palette.ink },
+  brandMark: { width: 32, height: 32, borderRadius: 8, backgroundColor: palette.coral, alignItems: 'center', justifyContent: 'center' },
   brandMarkText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  topTitle: { fontWeight: '800', fontSize: 15, color: palette.ink, letterSpacing: -0.2 },
+  topTitle: { fontWeight: '800', fontSize: 16, color: palette.ink },
   topSub: { color: palette.inkFaint, fontSize: 11, marginTop: 1 },
   logoutBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: palette.border },
   logoutText: { color: palette.inkMuted, fontSize: 12, fontWeight: '700' },
@@ -582,90 +600,83 @@ const s = StyleSheet.create({
 
   scroll: { padding: 16, paddingBottom: 40 },
 
-  // Stats
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   statCard: { flex: 1, backgroundColor: palette.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: palette.border, alignItems: 'center' },
   statValue: { fontWeight: '800', fontSize: 26, letterSpacing: -0.5 },
   statLabel: { color: palette.inkFaint, fontSize: 10, marginTop: 3, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  // Create course CTA
-  createBtn: { backgroundColor: palette.coral, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
-  createBtnIcon: { color: '#fff', fontSize: 22, fontWeight: '800', width: 38, height: 38, lineHeight: 38, textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 19, overflow: 'hidden' },
+  createBtn: { backgroundColor: palette.coral, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
+  createBtnIcon: { color: '#fff', fontSize: 22, fontWeight: '800' },
   createBtnTitle: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  createBtnSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
+  createBtnSub: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 1 },
+  chevron: { color: 'rgba(255,255,255,0.6)', fontSize: 24 },
 
-  // Card
   card: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 14, overflow: 'hidden' },
   sectionTitle: { fontWeight: '800', fontSize: 14, color: palette.ink, padding: 16, paddingBottom: 8 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: palette.border },
-  cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  cardHeaderLabel: { color: palette.inkMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
 
-  // Course rows
-  courseRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 13, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border },
-  codeTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginTop: 2 },
+  courseRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border },
+  codeTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   codeTagText: { fontWeight: '800', fontSize: 11 },
-  courseTitle: { fontWeight: '700', fontSize: 14, color: palette.ink },
-  courseSub: { color: palette.inkFaint, fontSize: 11, marginTop: 2 },
-  enrollPill: { alignSelf: 'flex-start', backgroundColor: palette.mintLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 6 },
-  enrollText: { color: '#2d7a55', fontSize: 10, fontWeight: '700' },
-  chevron: { color: palette.inkFaint, fontSize: 22, marginLeft: 8 },
+  courseInfo: { flex: 1 },
+  courseTitle: { fontWeight: '700', fontSize: 14, color: palette.ink, marginBottom: 2 },
+  courseMeta: { color: palette.inkFaint, fontSize: 11, marginTop: 1 },
+  startBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: palette.paper, borderWidth: 1, borderColor: palette.border },
+  startBtnActive: { backgroundColor: palette.coral, borderColor: palette.coral },
+  startBtnText: { fontSize: 12, fontWeight: '700', color: palette.inkMuted },
+  startBtnTextActive: { color: '#fff' },
 
-  // Students
-  studentRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: palette.border },
-  avatarSm: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  avatarSmText: { fontWeight: '800', fontSize: 11 },
-  studentName: { fontWeight: '700', fontSize: 13, color: palette.ink },
-  studentSub: { color: palette.inkFaint, fontSize: 11, marginTop: 1 },
-  moreText: { padding: 14, textAlign: 'center', color: palette.inkFaint, fontSize: 12, fontWeight: '600' },
+  coursePill: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.paper, marginRight: 8, minWidth: 110 },
+  coursePillActive: { backgroundColor: palette.coralLight, borderColor: palette.coral },
+  coursePillCode: { fontSize: 10, fontWeight: '800', color: palette.inkFaint, textTransform: 'uppercase' },
+  coursePillCodeActive: { color: palette.coralDark },
+  coursePillTitle: { fontSize: 13, fontWeight: '700', color: palette.ink, marginTop: 2 },
+  coursePillTitleActive: { color: palette.coralDark },
 
-  // Session
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.coral },
-  stopBtn: { backgroundColor: palette.coralLight, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(242,126,104,.25)' },
-  stopBtnText: { color: palette.coralDark, fontWeight: '800', fontSize: 13 },
-  coursePickerBtn: { flexDirection: 'row', alignItems: 'center', margin: 14, borderWidth: 1.5, borderColor: palette.border, borderRadius: 12, padding: 14, backgroundColor: palette.paper },
-  coursePickerLeft: { flex: 1 },
-  coursePickerCode: { fontSize: 10, fontWeight: '800', color: palette.inkFaint, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 3 },
-  coursePickerTitle: { fontSize: 15, fontWeight: '700', color: palette.ink },
-  startBtn: { backgroundColor: palette.coral, marginHorizontal: 14, marginBottom: 14, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  startBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  sessionCourse: { fontSize: 16, fontWeight: '800', color: palette.ink, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 2 },
-  sessionMeta: { fontSize: 12, color: palette.inkFaint, paddingHorizontal: 16, paddingBottom: 10 },
-  qrContainer: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 },
-  qrFrame: { backgroundColor: palette.paper, padding: 12, borderRadius: 16, borderWidth: 1.5, borderColor: palette.border },
-  qrMeta: { flex: 1, alignItems: 'center', gap: 10 },
-  countdownBadge: { backgroundColor: palette.navy, borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center' },
-  countdownNum: { color: '#fff', fontSize: 36, fontWeight: '800', letterSpacing: -1 },
-  countdownLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
-  qrHint: { color: palette.inkFaint, fontSize: 11, textAlign: 'center', lineHeight: 17 },
-  presentRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 16, paddingBottom: 16 },
-  presentNum: { fontWeight: '800', fontSize: 28, color: palette.mint },
-  presentOf: { fontWeight: '700', fontSize: 20, color: palette.inkFaint },
-  presentLabel: { color: palette.inkFaint, fontSize: 13, fontWeight: '600' },
+  startBox: { padding: 24, alignItems: 'center' },
+  startBoxTitle: { fontSize: 16, fontWeight: '800', color: palette.ink, marginBottom: 4 },
+  startBoxSub: { fontSize: 12, color: palette.inkFaint, marginBottom: 16 },
+  heroStartBtn: { backgroundColor: palette.coral, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, width: '100%', alignItems: 'center' },
+  heroStartBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
-  // Dashboard
-  dashboardHeader: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: palette.paper, borderBottomWidth: 1, borderBottomColor: palette.border },
-  dashHeaderText: { flex: 1, fontSize: 10, fontWeight: '700', color: palette.inkFaint, textTransform: 'uppercase', letterSpacing: 0.5 },
+  liveHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: palette.border },
+  liveHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.mint },
+  liveHeaderTitle: { fontWeight: '800', fontSize: 14, color: palette.ink },
+  stopBtn: { backgroundColor: palette.coralLight, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  stopBtnText: { color: palette.coralDark, fontWeight: '800', fontSize: 12 },
+
+  qrBox: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: palette.border },
+  qrWrap: { padding: 14, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 16 },
+  qrMeta: { alignItems: 'center' },
+  countdownBadge: { backgroundColor: palette.paper, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: palette.border, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  countdownNum: { fontWeight: '800', fontSize: 16, color: palette.coral },
+  countdownLabel: { fontSize: 11, color: palette.inkFaint, fontWeight: '600' },
+  qrHint: { textAlign: 'center', color: palette.inkFaint, fontSize: 11, lineHeight: 16 },
+
+  presentRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', padding: 16 },
+  presentNum: { fontSize: 28, fontWeight: '800', color: palette.mint },
+  presentOf: { fontSize: 16, fontWeight: '700', color: palette.inkFaint },
+  presentLabel: { fontSize: 13, color: palette.inkMuted, fontWeight: '600' },
+
+  dashboardHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: palette.paper, borderBottomWidth: 1, borderBottomColor: palette.border },
+  dashHeaderText: { fontSize: 11, fontWeight: '700', color: palette.inkFaint, textTransform: 'uppercase' },
+
   rosterRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: palette.border },
+  avatarSm: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  avatarSmText: { fontWeight: '800', fontSize: 11 },
   rosterInfo: { flex: 1 },
   rosterName: { fontWeight: '700', fontSize: 13, color: palette.ink },
   rosterSub: { color: palette.inkFaint, fontSize: 11, marginTop: 1 },
-  timeStamp: { backgroundColor: palette.paper, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  timeText: { fontSize: 10, fontWeight: '700', color: palette.inkMuted },
-  checkmark: { color: palette.mint, fontSize: 18, fontWeight: '800' },
+  timeStamp: { marginRight: 8 },
+  timeText: { fontSize: 11, color: palette.inkFaint },
+  checkmark: { color: palette.mint, fontWeight: '800', fontSize: 14 },
 
-  // Export
-  exportHeader: { alignItems: 'center', padding: 24, marginBottom: 14 },
-  exportHeaderIcon: { fontSize: 40, marginBottom: 10 },
-  exportHeaderTitle: { fontSize: 20, fontWeight: '800', color: palette.ink, marginBottom: 4 },
-  exportHeaderSub: { color: palette.inkFaint, fontSize: 13, textAlign: 'center' },
-  exportRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: palette.surface, borderRadius: 14, borderWidth: 1, borderColor: palette.border, padding: 16, marginBottom: 10, gap: 14 },
+  exportRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border },
   exportCourseTitle: { fontWeight: '700', fontSize: 14, color: palette.ink },
-  exportCourseSub: { color: palette.inkFaint, fontSize: 11, marginTop: 2 },
-  exportBtn: { backgroundColor: palette.mint, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
-  exportBtnText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  exportCourseSub: { fontSize: 11, color: palette.inkFaint, marginTop: 2 },
+  exportBtn: { backgroundColor: palette.coralLight, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  exportBtnText: { color: palette.coralDark, fontWeight: '800', fontSize: 12 },
 
-  // Profile
   profileHeader: { alignItems: 'center', padding: 24, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.paper },
   avatarXL: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   profileName: { fontSize: 18, fontWeight: '800', color: palette.ink },
@@ -674,22 +685,42 @@ const s = StyleSheet.create({
   roleBadgeText: { color: palette.coralDark, fontSize: 10, fontWeight: '800' },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: palette.inkMuted, marginBottom: 6, marginTop: 10 },
   input: { backgroundColor: palette.paper, borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: palette.ink, marginVertical: 6 },
+  saveBtn: { backgroundColor: palette.coral, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  saveBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   signOutBtn: { backgroundColor: palette.coralLight, paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(242,126,104,.25)' },
   signOutText: { color: palette.coralDark, fontWeight: '800', fontSize: 14 },
 
-  // Empty
   emptyCard: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, alignItems: 'center', padding: 36, marginBottom: 14 },
-  emptyIcon: { fontSize: 40, marginBottom: 12 },
   emptyTitle: { fontWeight: '800', fontSize: 16, color: palette.ink, marginBottom: 6 },
   emptyText: { color: palette.inkFaint, fontSize: 13, textAlign: 'center' },
 
-  // Modals
-  modalRoot: { flex: 1, backgroundColor: palette.paper },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingTop: 20, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
-  modalTitle: { fontWeight: '800', fontSize: 17, color: palette.ink },
-  modalCloseBtn: { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: palette.coralLight, borderRadius: 8 },
-  modalCloseText: { color: palette.coralDark, fontWeight: '800', fontSize: 13 },
-  modalRow: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface, marginBottom: 1 },
-  courseRowTitle: { fontWeight: '700', fontSize: 14, color: palette.ink },
-  courseRowSub: { color: palette.inkFaint, fontSize: 11, marginTop: 2 },
+  // Drawer Sidebar
+  drawerOverlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)' },
+  drawerBackdrop: { flex: 1 },
+  drawerContent: { width: 280, backgroundColor: palette.surface, height: '100%', borderRightWidth: 1, borderRightColor: palette.border, padding: 20, paddingTop: 56 },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: palette.border, marginBottom: 16 },
+  drawerAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  drawerAvatarText: { color: palette.coralDark, fontWeight: '800', fontSize: 16 },
+  drawerTitle: { fontWeight: '800', fontSize: 16, color: palette.ink },
+  drawerUser: { fontSize: 13, fontWeight: '600', color: palette.inkMuted, marginTop: 1 },
+  drawerRole: { fontSize: 10, fontWeight: '700', color: palette.coral, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
+  drawerCloseBtn: { padding: 6 },
+  drawerCloseText: { fontSize: 18, color: palette.inkFaint, fontWeight: '700' },
+  drawerNav: { flex: 1 },
+  drawerNavItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginBottom: 4 },
+  drawerNavItemActive: { backgroundColor: palette.coralLight },
+  drawerNavText: { fontSize: 14, fontWeight: '600', color: palette.inkMuted },
+  drawerNavTextActive: { color: palette.coralDark, fontWeight: '800' },
+  activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.coralDark },
+  drawerFooter: { borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 16 },
+  drawerLogoutBtn: { backgroundColor: palette.coralLight, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  drawerLogoutText: { color: palette.coralDark, fontWeight: '800', fontSize: 14 },
+
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalCard: { backgroundColor: palette.surface, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: palette.border },
+  modalCardTitle: { fontSize: 18, fontWeight: '800', color: palette.ink, marginBottom: 14 },
+  modalCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: palette.border, alignItems: 'center' },
+  modalCancelText: { fontWeight: '700', color: palette.inkMuted, fontSize: 14 },
+  modalSaveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: palette.coral, alignItems: 'center' },
+  modalSaveText: { fontWeight: '800', color: '#fff', fontSize: 14 },
 });

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, ActivityIndicator, Alert, Modal, TextInput,
+  RefreshControl, ActivityIndicator, Alert, Modal, TextInput, Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { palette, getInitials, getAvatarColor, fmt12 } from '../theme';
@@ -13,6 +13,7 @@ export default function StudentScreen({ user, onLogout }) {
   const [stats, setStats] = useState({});       // courseId → { attended, total, percentage }
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerBusy, setScannerBusy] = useState(false);
   const [scanResult, setScanResult] = useState(null);
@@ -70,7 +71,7 @@ export default function StudentScreen({ user, onLogout }) {
       const payload = JSON.parse(data);
       if (!payload.sessionId || !payload.token) throw new Error('Invalid QR code');
       await markAttendance(payload.sessionId, payload.token);
-      setScanResult({ success: true, message: 'Attendance marked! ✓ You are present.' });
+      setScanResult({ success: true, message: 'Attendance marked successfully! You are present.' });
       await fetchData();
     } catch (err) {
       const codeMap = {
@@ -132,6 +133,9 @@ export default function StudentScreen({ user, onLogout }) {
       {/* ── Top bar ────────────────────────────────────────── */}
       <View style={s.topbar}>
         <View style={s.topLeft}>
+          <TouchableOpacity style={s.menuBtn} onPress={() => setDrawerOpen(true)}>
+            <Text style={s.menuIcon}>☰</Text>
+          </TouchableOpacity>
           <View style={s.brandMark}><Text style={s.brandMarkText}>A</Text></View>
           <View>
             <Text style={s.topTitle}>attendly</Text>
@@ -146,10 +150,10 @@ export default function StudentScreen({ user, onLogout }) {
       {/* ── Tab bar ────────────────────────────────────────── */}
       <View style={s.tabBar}>
         {[
-          { key: 'scan', label: '📷 Scan QR' },
-          { key: 'attendance', label: '📊 Attendance' },
-          { key: 'courses', label: '📖 Courses' },
-          { key: 'profile', label: '👤 Profile' },
+          { key: 'scan', label: 'Scan QR' },
+          { key: 'attendance', label: 'Attendance' },
+          { key: 'courses', label: 'Courses' },
+          { key: 'profile', label: 'Profile' },
         ].map(t => (
           <TouchableOpacity key={t.key} style={[s.tabItem, activeTab === t.key && s.tabItemActive]} onPress={() => setActiveTab(t.key)}>
             <Text style={[s.tabText, activeTab === t.key && s.tabTextActive]}>{t.label}</Text>
@@ -162,7 +166,7 @@ export default function StudentScreen({ user, onLogout }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={palette.blue} />}
       >
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 1 — SCAN QR (FR-5, FR-6)                    *
+         *  TAB 1 — SCAN QR                                  *
          * ══════════════════════════════════════════════════ */}
         {activeTab === 'scan' && (
           <>
@@ -171,7 +175,7 @@ export default function StudentScreen({ user, onLogout }) {
               <View style={s.heroLeft}>
                 <Text style={s.heroEyebrow}>STUDENT CONSOLE</Text>
                 <Text style={s.heroTitle}>
-                  {overallPct !== '—' ? (isOnTrack ? 'On track 🎯' : 'Needs improvement ⚠') : 'Welcome back!'}
+                  {overallPct !== '—' ? (isOnTrack ? 'On track' : 'Needs improvement') : 'Welcome back!'}
                 </Text>
                 <Text style={s.heroSub}>{courses.length} course{courses.length !== 1 ? 's' : ''} enrolled</Text>
               </View>
@@ -191,7 +195,7 @@ export default function StudentScreen({ user, onLogout }) {
             {/* Scan CTA */}
             <TouchableOpacity style={s.scanBtn} onPress={openScanner} activeOpacity={0.85}>
               <View style={s.scanIconWrap}>
-                <Text style={s.scanIcon}>⌾</Text>
+                <Text style={s.scanIconText}>[QR]</Text>
               </View>
               <View style={s.scanBtnTextWrap}>
                 <Text style={s.scanBtnTitle}>Mark Attendance</Text>
@@ -202,14 +206,14 @@ export default function StudentScreen({ user, onLogout }) {
 
             {/* Quick info */}
             <View style={s.infoBox}>
-              <Text style={s.infoIcon}>ℹ</Text>
+              <Text style={s.infoIconText}>i</Text>
               <Text style={s.infoText}>Point your camera at the QR code displayed on the classroom projector. Codes refresh every 8 seconds.</Text>
             </View>
           </>
         )}
 
         {/* ══════════════════════════════════════════════════ *
-         *  TAB 2 — MY ATTENDANCE (FR-10)                    *
+         *  TAB 2 — MY ATTENDANCE                            *
          * ══════════════════════════════════════════════════ */}
         {activeTab === 'attendance' && (
           <>
@@ -263,7 +267,6 @@ export default function StudentScreen({ user, onLogout }) {
               </View>
             ) : (
               <View style={s.emptyCard}>
-                <Text style={s.emptyIcon}>📊</Text>
                 <Text style={s.emptyTitle}>No attendance data</Text>
                 <Text style={s.emptyText}>Enroll in courses and attend sessions to see your attendance.</Text>
               </View>
@@ -289,9 +292,9 @@ export default function StudentScreen({ user, onLogout }) {
                     <View style={{ flex: 1 }}>
                       <Text style={s.courseDetailTitle}>{c.title}</Text>
                       <Text style={s.courseDetailSub}>{c.code} · Section {c.section || 'A'}</Text>
-                      <Text style={s.courseDetailSub}>🕒 {c.schedule || 'Schedule not set'}</Text>
-                      <Text style={s.courseDetailSub}>📍 {c.room || 'Room TBD'}</Text>
-                      <Text style={s.courseDetailSub}>👩‍🏫 {c.teacherId?.name || 'Faculty'}</Text>
+                      <Text style={s.courseDetailSub}>Schedule: {c.schedule || 'Schedule not set'}</Text>
+                      <Text style={s.courseDetailSub}>Room: {c.room || 'Room TBD'}</Text>
+                      <Text style={s.courseDetailSub}>Faculty: {c.teacherId?.name || 'Faculty'}</Text>
                     </View>
                     <Text style={s.detailArrow}>›</Text>
                   </TouchableOpacity>
@@ -299,7 +302,6 @@ export default function StudentScreen({ user, onLogout }) {
               </View>
             ) : (
               <View style={s.emptyCard}>
-                <Text style={s.emptyIcon}>📚</Text>
                 <Text style={s.emptyTitle}>No courses yet</Text>
                 <Text style={s.emptyText}>Ask your teacher to enroll you in a course.</Text>
               </View>
@@ -343,22 +345,72 @@ export default function StudentScreen({ user, onLogout }) {
         )}
       </ScrollView>
 
+      {/* ── Sidebar Drawer ─────────────────────────────────── */}
+      <Modal visible={drawerOpen} transparent animationType="fade" onRequestClose={() => setDrawerOpen(false)}>
+        <View style={s.drawerOverlay}>
+          <TouchableOpacity style={s.drawerBackdrop} activeOpacity={1} onPress={() => setDrawerOpen(false)} />
+          <View style={s.drawerContent}>
+            <View style={s.drawerHeader}>
+              <View style={[s.drawerAvatar, { backgroundColor: palette.blueLight }]}>
+                <Text style={s.drawerAvatarText}>{getInitials(user.name)}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.drawerTitle}>attendly</Text>
+                <Text style={s.drawerUser}>{user.name}</Text>
+                <Text style={s.drawerRole}>STUDENT</Text>
+              </View>
+              <TouchableOpacity onPress={() => setDrawerOpen(false)} style={s.drawerCloseBtn}>
+                <Text style={s.drawerCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={s.drawerNav}>
+              {[
+                { key: 'scan', label: 'Scan QR Code' },
+                { key: 'attendance', label: 'My Attendance' },
+                { key: 'courses', label: 'My Courses' },
+                { key: 'profile', label: 'Profile' },
+              ].map(item => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[s.drawerNavItem, activeTab === item.key && s.drawerNavItemActive]}
+                  onPress={() => {
+                    setActiveTab(item.key);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <Text style={[s.drawerNavText, activeTab === item.key && s.drawerNavTextActive]}>
+                    {item.label}
+                  </Text>
+                  {activeTab === item.key && <View style={s.activeDot} />}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={s.drawerFooter}>
+              <TouchableOpacity style={s.drawerLogoutBtn} onPress={() => { setDrawerOpen(false); onLogout(); }}>
+                <Text style={s.drawerLogoutText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Scanner modal ──────────────────────────────────── */}
       <Modal visible={scannerVisible} animationType="slide" onRequestClose={closeScanner}>
         <View style={s.scannerRoot}>
           <View style={s.scannerTopbar}>
             <Text style={s.scannerTitle}>Scan classroom QR</Text>
             <TouchableOpacity onPress={closeScanner} style={s.closeScanBtn}>
-              <Text style={s.closeScanText}>✕ Close</Text>
+              <Text style={s.closeScanText}>Close</Text>
             </TouchableOpacity>
           </View>
 
           {scanResult ? (
             <View style={s.scanResultWrap}>
               <View style={[s.scanResultCard, { borderColor: scanResult.success ? palette.mint : palette.coral }]}>
-                <Text style={s.scanResultIcon}>{scanResult.success ? '✓' : '✗'}</Text>
                 <Text style={[s.scanResultTitle, { color: scanResult.success ? palette.mint : palette.coralDark }]}>
-                  {scanResult.success ? 'Marked present!' : 'Scan failed'}
+                  {scanResult.success ? 'Marked Present' : 'Scan Failed'}
                 </Text>
                 <Text style={s.scanResultMsg}>{scanResult.message}</Text>
                 {!scanResult.success && (
@@ -425,9 +477,9 @@ export default function StudentScreen({ user, onLogout }) {
                 <View style={s.detailCard}>
                   <Text style={s.detailName}>{detailData.title}</Text>
                   <View style={s.detailPill}><Text style={s.detailPillText}>{detailData.code}</Text></View>
-                  <Text style={s.detailMeta}>📍 {detailData.room || 'Room TBD'} · Section {detailData.section || 'A'}</Text>
-                  <Text style={s.detailMeta}>🕒 {detailData.schedule || 'Schedule not set'}</Text>
-                  <Text style={s.detailMeta}>👩‍🏫 Instructor: {detailData.teacherId?.name || 'Faculty'} ({detailData.teacherId?.email || ''})</Text>
+                  <Text style={s.detailMeta}>Room: {detailData.room || 'Room TBD'} · Section {detailData.section || 'A'}</Text>
+                  <Text style={s.detailMeta}>Schedule: {detailData.schedule || 'Schedule not set'}</Text>
+                  <Text style={s.detailMeta}>Instructor: {detailData.teacherId?.name || 'Faculty'} ({detailData.teacherId?.email || ''})</Text>
                 </View>
 
                 {/* My stats for this course */}
@@ -495,8 +547,10 @@ function StatCard({ label, value, color }) {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.paper },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.paper },
-  topbar: { backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, paddingTop: 52 },
+  topbar: { backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, paddingTop: 52 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  menuBtn: { paddingHorizontal: 8, paddingVertical: 4, marginRight: 2 },
+  menuIcon: { fontSize: 22, fontWeight: '700', color: palette.ink },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontWeight: '800', fontSize: 12 },
   brandMark: { width: 32, height: 32, borderRadius: 8, backgroundColor: palette.coral, alignItems: 'center', justifyContent: 'center' },
@@ -534,7 +588,7 @@ const s = StyleSheet.create({
   // Scan CTA — blue accent
   scanBtn: { backgroundColor: palette.blue, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   scanIconWrap: { width: 46, height: 46, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  scanIcon: { color: '#fff', fontSize: 26 },
+  scanIconText: { color: '#fff', fontWeight: '800', fontSize: 13, letterSpacing: 0.5 },
   scanBtnTextWrap: { flex: 1 },
   scanBtnTitle: { color: '#fff', fontWeight: '800', fontSize: 16 },
   scanBtnSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
@@ -542,7 +596,7 @@ const s = StyleSheet.create({
 
   // Info box
   infoBox: { flexDirection: 'row', gap: 10, backgroundColor: palette.blueLight, borderRadius: 12, padding: 14, alignItems: 'flex-start' },
-  infoIcon: { fontSize: 16, color: '#2e5fa1' },
+  infoIconText: { fontSize: 13, fontWeight: '800', color: '#2e5fa1', width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: '#2e5fa1', textAlign: 'center', lineHeight: 16 },
   infoText: { flex: 1, fontSize: 12, color: '#2e5fa1', lineHeight: 18 },
 
   // Cards
@@ -591,9 +645,30 @@ const s = StyleSheet.create({
 
   // Empty
   emptyCard: { backgroundColor: palette.surface, borderRadius: 16, borderWidth: 1, borderColor: palette.border, alignItems: 'center', padding: 36, marginBottom: 14 },
-  emptyIcon: { fontSize: 40, marginBottom: 12 },
   emptyTitle: { fontWeight: '800', fontSize: 16, color: palette.ink, marginBottom: 6 },
   emptyText: { color: palette.inkFaint, fontSize: 13, textAlign: 'center' },
+
+  // Drawer Sidebar
+  drawerOverlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)' },
+  drawerBackdrop: { flex: 1 },
+  drawerContent: { width: 280, backgroundColor: palette.surface, height: '100%', borderRightWidth: 1, borderRightColor: palette.border, padding: 20, paddingTop: 56 },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: palette.border, marginBottom: 16 },
+  drawerAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  drawerAvatarText: { color: '#2e5fa1', fontWeight: '800', fontSize: 16 },
+  drawerTitle: { fontWeight: '800', fontSize: 16, color: palette.ink },
+  drawerUser: { fontSize: 13, fontWeight: '600', color: palette.inkMuted, marginTop: 1 },
+  drawerRole: { fontSize: 10, fontWeight: '700', color: palette.blue, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
+  drawerCloseBtn: { padding: 6 },
+  drawerCloseText: { fontSize: 18, color: palette.inkFaint, fontWeight: '700' },
+  drawerNav: { flex: 1 },
+  drawerNavItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginBottom: 4 },
+  drawerNavItemActive: { backgroundColor: palette.blueLight },
+  drawerNavText: { fontSize: 14, fontWeight: '600', color: palette.inkMuted },
+  drawerNavTextActive: { color: '#2e5fa1', fontWeight: '800' },
+  activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2e5fa1' },
+  drawerFooter: { borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 16 },
+  drawerLogoutBtn: { backgroundColor: palette.coralLight, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  drawerLogoutText: { color: palette.coralDark, fontWeight: '800', fontSize: 14 },
 
   // Scanner
   scannerRoot: { flex: 1, backgroundColor: '#111' },
@@ -613,7 +688,6 @@ const s = StyleSheet.create({
   permBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   scanResultWrap: { flex: 1, backgroundColor: '#1a2f4a', alignItems: 'center', justifyContent: 'center', padding: 30 },
   scanResultCard: { backgroundColor: palette.surface, borderRadius: 20, borderWidth: 2, padding: 32, alignItems: 'center', width: '100%', maxWidth: 340 },
-  scanResultIcon: { fontSize: 52, marginBottom: 14 },
   scanResultTitle: { fontWeight: '800', fontSize: 22, marginBottom: 8 },
   scanResultMsg: { color: palette.inkMuted, fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 22 },
   retryBtn: { backgroundColor: palette.blueLight, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 10 },

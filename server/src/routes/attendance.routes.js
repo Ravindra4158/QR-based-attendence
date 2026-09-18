@@ -28,7 +28,16 @@ router.post('/mark', requireAuth, requireRole('student'), async (req, res, next)
     const attendance = await Attendance.create({ sessionId, studentId: req.user.id });
     const populatedAttendance = await Attendance.findById(attendance._id).populate('studentId', 'name rollNo email');
 
-    req.app.get('io').to(`session:${sessionId}`).emit('attendance:marked', { sessionId, attendance: populatedAttendance });
+    const io = req.app.get('io');
+    if (io) {
+      const sIdStr = session._id.toString();
+      io.to(`session:${sIdStr}`).emit('attendance:marked', { sessionId: sIdStr, attendance: populatedAttendance });
+      if (sessionId && sessionId !== sIdStr) {
+        io.to(`session:${sessionId}`).emit('attendance:marked', { sessionId, attendance: populatedAttendance });
+      }
+      io.emit('attendance:marked', { sessionId: sIdStr, attendance: populatedAttendance });
+    }
+
     res.status(201).json({ success: true, message: 'Attendance marked successfully', attendance: populatedAttendance });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ success: false, code: 'ALREADY_MARKED', message: 'Attendance already marked for this session' });

@@ -135,7 +135,7 @@ export default function LoginScreen({ onLogin }) {
 
             {/* Server Config Footer */}
             <TouchableOpacity style={s.serverFooter} onPress={() => setShowServerModal(true)}>
-              <Text style={s.serverFooterText}>🌐 Server: {currentServer || 'Auto'}</Text>
+              <Text style={s.serverFooterText}>Server: {currentServer || 'Auto'}</Text>
             </TouchableOpacity>
           </View>
 
