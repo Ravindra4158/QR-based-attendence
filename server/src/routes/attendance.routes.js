@@ -7,11 +7,19 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import User from '../models/User.js';
 
 const router = Router();
+const sessionDurationMs = () => Number(process.env.SESSION_AUTO_END_MINUTES || 15) * 60 * 1000;
+const sessionAutoEndTime = session => new Date(session.startTime.getTime() + sessionDurationMs());
+const isSessionExpired = session => Date.now() >= sessionAutoEndTime(session).getTime();
 
 router.post('/mark', requireAuth, requireRole('student'), async (req, res, next) => {
   try {
     const { sessionId, token } = req.body;
     const session = await Session.findById(sessionId);
+    if (session?.isActive && isSessionExpired(session)) {
+      session.isActive = false;
+      session.endTime = sessionAutoEndTime(session);
+      await session.save();
+    }
     if (!session || !session.isActive) return res.status(400).json({ success: false, code: 'SESSION_CLOSED', message: 'Session is closed' });
     const course = await Course.findById(session.courseId);
     if (!course) return res.status(404).json({ success: false, code: 'COURSE_NOT_FOUND', message: 'Course not found' });
